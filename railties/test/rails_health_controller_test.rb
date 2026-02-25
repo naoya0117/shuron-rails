@@ -8,6 +8,8 @@ class HealthControllerTest < ActionController::TestCase
   def setup
     Rails.application.routes.draw do
       get "/up" => "rails/health#show", as: :rails_health_check
+      get "/container/health/live" => "rails/health#live", as: :rails_liveness_check
+      get "/container/health/ready" => "rails/health#ready", as: :rails_readiness_check
     end
     @routes = Rails.application.routes
   end
@@ -54,5 +56,125 @@ class HealthControllerTest < ActionController::TestCase
     assert_equal "down", json_response["status"]
     assert_includes json_response, "timestamp"
     assert_match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, json_response["timestamp"])
+  end
+
+  test "health controller liveness endpoint returns success with empty body" do
+    get :live
+    assert_response :success
+    assert_equal "", @response.body
+  end
+
+  test "health controller returns JSON readiness success response" do
+    pool = Object.new
+    connection = Object.new
+    connection.define_singleton_method(:active?) { true }
+    pool.define_singleton_method(:with_connection) { |&block| block.call(connection) }
+
+    ActiveRecord::Base.stub(:connection_pool, pool) do
+      get :ready, format: :json
+    end
+
+    assert_response :success
+    assert_includes @response.content_type, "application/json"
+
+    json_response = JSON.parse(@response.body)
+    assert_equal "ready", json_response["status"]
+    assert_equal "ok", json_response.dig("checks", "database")
+    assert_includes json_response, "timestamp"
+    assert_match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, json_response["timestamp"])
+  end
+
+  test "health controller returns JSON readiness error response when database is unavailable" do
+    pool = Object.new
+    connection = Object.new
+    connection.define_singleton_method(:active?) { false }
+    pool.define_singleton_method(:with_connection) { |&block| block.call(connection) }
+
+    ActiveRecord::Base.stub(:connection_pool, pool) do
+      get :ready, format: :json
+    end
+
+    assert_response :service_unavailable
+    assert_includes @response.content_type, "application/json"
+
+    json_response = JSON.parse(@response.body)
+    assert_equal "not_ready", json_response["status"]
+    assert_equal "error", json_response.dig("checks", "database")
+    assert_includes json_response, "timestamp"
+    assert_match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, json_response["timestamp"])
+  end
+
+  test "health controller returns JSON readiness error response when database check raises" do
+    pool = Object.new
+    pool.define_singleton_method(:with_connection) { raise ActiveRecord::ConnectionNotEstablished, "db down" }
+
+    ActiveRecord::Base.stub(:connection_pool, pool) do
+      get :ready, format: :json
+    end
+
+    assert_response :service_unavailable
+    assert_includes @response.content_type, "application/json"
+
+    json_response = JSON.parse(@response.body)
+    assert_equal "not_ready", json_response["status"]
+    assert_equal "error", json_response.dig("checks", "database")
+    assert_includes json_response, "timestamp"
+    assert_match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, json_response["timestamp"])
+  end
+
+  test "health controller returns JSON readiness success response when database check is disabled" do
+    original_config = Rails.application.config.x.kubernetes_container
+    Rails.application.config.x.kubernetes_container = { readiness: { check_database: false } }
+
+    get :ready, format: :json
+
+    assert_response :success
+    assert_includes @response.content_type, "application/json"
+
+    json_response = JSON.parse(@response.body)
+    assert_equal "ready", json_response["status"]
+    assert_equal "skipped", json_response.dig("checks", "database")
+    assert_includes json_response, "timestamp"
+    assert_match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, json_response["timestamp"])
+  ensure
+    Rails.application.config.x.kubernetes_container = original_config
+  end
+
+  test "health controller readiness path can be configured via container definition" do
+    original_config = Rails.application.config.x.kubernetes_container
+    original_loaded_flag = Rails.application.config.x.kubernetes_container_definition_loaded
+    Rails.application.config.x.kubernetes_container = { readiness: { path: "/health/readyz" } }
+    Rails.application.config.x.kubernetes_container_definition_loaded = true
+
+    assert_equal "/health/readyz", Rails::HealthController.readiness_path
+  ensure
+    Rails.application.config.x.kubernetes_container = original_config
+    Rails.application.config.x.kubernetes_container_definition_loaded = original_loaded_flag
+  end
+
+  test "health controller liveness path can be configured via container definition" do
+    original_config = Rails.application.config.x.kubernetes_container
+    original_loaded_flag = Rails.application.config.x.kubernetes_container_definition_loaded
+    Rails.application.config.x.kubernetes_container = { liveness: { path: "/health/livez" } }
+    Rails.application.config.x.kubernetes_container_definition_loaded = true
+
+    assert_equal "/health/livez", Rails::HealthController.liveness_path
+  ensure
+    Rails.application.config.x.kubernetes_container = original_config
+    Rails.application.config.x.kubernetes_container_definition_loaded = original_loaded_flag
+  end
+
+  test "health controller accepts string keys in container readiness configuration" do
+    original_config = Rails.application.config.x.kubernetes_container
+    Rails.application.config.x.kubernetes_container = { "readiness" => { "check_database" => false } }
+
+    get :ready, format: :json
+
+    assert_response :success
+    json_response = JSON.parse(@response.body)
+    assert_equal "ready", json_response["status"]
+    assert_equal "skipped", json_response.dig("checks", "database")
+  ensure
+    Rails.application.config.x.kubernetes_container = original_config
   end
 end

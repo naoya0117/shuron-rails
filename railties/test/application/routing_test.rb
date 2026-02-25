@@ -143,6 +143,121 @@ module ApplicationTests
       assert_equal 200, last_response.status
     end
 
+    test "rails/liveness in production without explicit route" do
+      app("production")
+
+      get("/container/health/live", {}, "HTTPS" => "on")
+      assert_equal 200, last_response.status
+    end
+
+    test "rails/liveness path follows container definition without routes.rb changes" do
+      app_file "config/container.rb", <<-RUBY
+        Rails.application.configure do
+          config.x.kubernetes_container = {
+            liveness: {
+              path: "/health/livez"
+            },
+            readiness: {
+              check_database: false
+            }
+          }
+        end
+      RUBY
+
+      app("production")
+
+      get("/health/livez", {}, "HTTPS" => "on")
+      assert_equal 200, last_response.status
+
+      get("/container/health/live", {}, "HTTPS" => "on")
+      assert_equal 404, last_response.status
+    end
+
+    test "rails/liveness route is not duplicated when application defines it" do
+      app_file "config/routes.rb", <<-RUBY
+        Rails.application.routes.draw do
+          get "custom-live" => "rails/health#live", as: :rails_liveness_check
+        end
+      RUBY
+
+      app("production")
+
+      assert_equal "/custom-live",
+        Rails.application.routes.url_helpers.rails_liveness_check_path
+
+      get("/custom-live", {}, "HTTPS" => "on")
+      assert_equal 200, last_response.status
+
+      get("/container/health/live", {}, "HTTPS" => "on")
+      assert_equal 404, last_response.status
+    end
+
+    test "rails/readiness in production without explicit route" do
+      app_file "config/container.rb", <<-RUBY
+        Rails.application.configure do
+          config.x.kubernetes_container = {
+            readiness: {
+              check_database: false
+            }
+          }
+        end
+      RUBY
+
+      app("production")
+      get("/container/health/ready", {}, "HTTPS" => "on")
+      assert_equal 200, last_response.status
+    end
+
+    test "rails/readiness path follows container definition without routes.rb changes" do
+      app_file "config/container.rb", <<-RUBY
+        Rails.application.configure do
+          config.x.kubernetes_container = {
+            readiness: {
+              path: "/health/readyz",
+              check_database: false
+            }
+          }
+        end
+      RUBY
+
+      app("production")
+
+      get("/health/readyz", {}, "HTTPS" => "on")
+      assert_equal 200, last_response.status
+
+      get("/container/health/ready", {}, "HTTPS" => "on")
+      assert_equal 404, last_response.status
+    end
+
+    test "rails/readiness route is not duplicated when application defines it" do
+      app_file "config/container.rb", <<-RUBY
+        Rails.application.configure do
+          config.x.kubernetes_container = {
+            readiness: {
+              check_database: false
+            }
+          }
+        end
+      RUBY
+
+      app_file "config/routes.rb", <<-RUBY
+        Rails.application.routes.draw do
+          get "custom-ready" => "rails/health#ready", as: :rails_readiness_check
+        end
+      RUBY
+
+      app("production")
+
+      assert_equal "/custom-ready",
+        Rails.application.routes.url_helpers.rails_readiness_check_path
+
+      get("/custom-ready", {}, "HTTPS" => "on")
+      assert_equal 200, last_response.status
+
+      get("/container/health/ready", {}, "HTTPS" => "on")
+      assert_equal 404, last_response.status
+    end
+
     test "simple controller" do
       simple_controller
 

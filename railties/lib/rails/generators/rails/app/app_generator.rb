@@ -125,6 +125,7 @@ module Rails
 
       inside "config" do
         template "routes.rb" unless options[:update]
+        template "container.rb" unless options[:update]
         template "application.rb"
         template "environment.rb"
         template "bundler-audit.yml" unless skip_bundler_audit?
@@ -143,6 +144,7 @@ module Rails
       action_cable_config_exist       = File.exist?("config/cable.yml")
       active_storage_config_exist     = File.exist?("config/storage.yml")
       ci_config_exist                 = File.exist?("config/ci.rb")
+      container_config_exist          = File.exist?("config/container.rb")
       bundle_audit_config_exist       = File.exist?("config/bundler-audit.yml")
       rack_cors_config_exist          = File.exist?("config/initializers/cors.rb")
       assets_config_exist             = File.exist?("config/initializers/assets.rb")
@@ -163,6 +165,10 @@ module Rails
 
       if !ci_config_exist
         template "config/ci.rb"
+      end
+
+      if !container_config_exist
+        template "config/container.rb"
       end
 
       if skip_asset_pipeline? && !assets_config_exist

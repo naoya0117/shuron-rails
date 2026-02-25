@@ -145,10 +145,32 @@ module Rails
             get "/rails/info/notes"      => "rails/info#notes",      internal: true
             get "/rails/info"            => "rails/info#index",      internal: true
           end
+        end
 
-          routes_reloader.run_after_load_paths = -> do
+        routes_reloader.run_after_load_paths = -> do
+          if Rails.env.development?
             app.routes.append do
               get "/" => "rails/welcome#index", internal: true
+            end
+          end
+
+          liveness_route_defined = app.routes.named_routes.key?(:rails_liveness_check) ||
+            app.routes.from_requirements(controller: "rails/health", action: "live")
+
+          unless liveness_route_defined
+            app.routes.append do
+              get Rails::HealthController.liveness_path.delete_prefix("/") => "rails/health#live",
+                as: :rails_liveness_check
+            end
+          end
+
+          readiness_route_defined = app.routes.named_routes.key?(:rails_readiness_check) ||
+            app.routes.from_requirements(controller: "rails/health", action: "ready")
+
+          unless readiness_route_defined
+            app.routes.append do
+              get Rails::HealthController.readiness_path.delete_prefix("/") => "rails/health#ready",
+                as: :rails_readiness_check
             end
           end
         end

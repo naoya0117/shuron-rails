@@ -175,6 +175,7 @@ class ApiAppGeneratorTest < Rails::Generators::TestCase
         config/boot.rb
         config/bundler-audit.yml
         config/cable.yml
+        config/container.rb
         config/environment.rb
         config/environments
         config/environments/development.rb
