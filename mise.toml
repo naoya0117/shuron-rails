@@ -1,2 +1,4 @@
 [tools]
+k3d = "5.8"
+kubectl = "1.36"
 ruby = "3.3"
