@@ -5,6 +5,7 @@ require "rake"
 # Load Rails Rakefile extensions
 %w(
   framework
+  kubernetes
   log
   misc
   tmp
