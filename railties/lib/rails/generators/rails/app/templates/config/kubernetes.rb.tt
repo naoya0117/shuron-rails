@@ -2,16 +2,10 @@ Rails.application.configure do
   # Kubernetes-layer configuration for Kubernetes-focused runtime behavior.
   # Keep health checks and future Kubernetes-specific settings in this one file.
   config.x.kubernetes = {
-    endpoints: {
-      liveness_path: "/kubernetes/health/live",
-      readiness_path: "/kubernetes/health/ready"
-    },
     liveness: {
-      # If set, this path is preferred over endpoints.liveness_path.
       path: "/kubernetes/health/live"
     },
     readiness: {
-      # If set, this path is preferred over endpoints.readiness_path.
       path: "/kubernetes/health/ready",
       check_database: true,
       timeout_ms: Integer(ENV.fetch("KC_READINESS_TIMEOUT_MS", "300"))

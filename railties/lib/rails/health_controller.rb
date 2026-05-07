@@ -50,19 +50,11 @@ module Rails
 
     class << self
       def liveness_path
-        explicit_path = read_config_value(liveness_config, :path)
-        return explicit_path if explicit_path.present?
-
-        endpoint_path = read_config_value(endpoint_config, :liveness_path)
-        endpoint_path.presence || "/kubernetes/health/live"
+        read_config_value(liveness_config, :path).presence || "/kubernetes/health/live"
       end
 
       def readiness_path
-        explicit_path = read_config_value(readiness_config, :path)
-        return explicit_path if explicit_path.present?
-
-        endpoint_path = read_config_value(endpoint_config, :readiness_path)
-        endpoint_path.presence || "/kubernetes/health/ready"
+        read_config_value(readiness_config, :path).presence || "/kubernetes/health/ready"
       end
 
       def liveness_config
@@ -74,10 +66,6 @@ module Rails
       end
 
       private
-        def endpoint_config
-          extract_nested_config(kubernetes_definition_config, :endpoints)
-        end
-
         def kubernetes_definition_config
           load_kubernetes_definition!
           Rails.application.config.x.kubernetes || {}
