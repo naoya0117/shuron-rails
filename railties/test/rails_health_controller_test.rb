@@ -8,8 +8,8 @@ class HealthControllerTest < ActionController::TestCase
   def setup
     Rails.application.routes.draw do
       get "/up" => "rails/health#show", as: :rails_health_check
-      get "/container/health/live" => "rails/health#live", as: :rails_liveness_check
-      get "/container/health/ready" => "rails/health#ready", as: :rails_readiness_check
+      get "/kubernetes/health/live" => "rails/health#live", as: :rails_liveness_check
+      get "/kubernetes/health/ready" => "rails/health#ready", as: :rails_readiness_check
     end
     @routes = Rails.application.routes
   end

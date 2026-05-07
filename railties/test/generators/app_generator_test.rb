@@ -47,7 +47,7 @@ DEFAULT_APP_FILES = %w(
   config/bundler-audit.yml
   config/cable.yml
   config/ci.rb
-  config/container.rb
+  config/kubernetes.rb
   config/credentials.yml.enc
   config/database.yml
   config/environment.rb

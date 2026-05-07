@@ -27,14 +27,14 @@ module Rails
   # The health check will now be accessible via the +/healthz+ path.
   #
   # \Rails also auto-registers +rails/health#live+ as +rails_liveness_check+.
-  # Configure its path in <tt>"config/container.rb"</tt> with
-  # <tt>config.x.kubernetes_container.liveness.path</tt> (or
-  # <tt>config.x.kubernetes_container.endpoints.liveness_path</tt>).
+  # Configure its path in <tt>"config/kubernetes.rb"</tt> with
+  # <tt>config.x.kubernetes.liveness.path</tt> (or
+  # <tt>config.x.kubernetes.endpoints.liveness_path</tt>).
   #
   # \Rails also auto-registers +rails/health#ready+ as +rails_readiness_check+.
-  # Configure its path in <tt>"config/container.rb"</tt> with
-  # <tt>config.x.kubernetes_container.readiness.path</tt> (or
-  # <tt>config.x.kubernetes_container.endpoints.readiness_path</tt>).
+  # Configure its path in <tt>"config/kubernetes.rb"</tt> with
+  # <tt>config.x.kubernetes.readiness.path</tt> (or
+  # <tt>config.x.kubernetes.endpoints.readiness_path</tt>).
   #
   # NOTE: This endpoint does not reflect the status of all of your application's
   # dependencies, such as the database or Redis cluster. Replace
@@ -54,7 +54,7 @@ module Rails
         return explicit_path if explicit_path.present?
 
         endpoint_path = read_config_value(endpoint_config, :liveness_path)
-        endpoint_path.presence || "/container/health/live"
+        endpoint_path.presence || "/kubernetes/health/live"
       end
 
       def readiness_path
@@ -62,35 +62,35 @@ module Rails
         return explicit_path if explicit_path.present?
 
         endpoint_path = read_config_value(endpoint_config, :readiness_path)
-        endpoint_path.presence || "/container/health/ready"
+        endpoint_path.presence || "/kubernetes/health/ready"
       end
 
       def liveness_config
-        extract_nested_config(container_definition_config, :liveness)
+        extract_nested_config(kubernetes_definition_config, :liveness)
       end
 
       def readiness_config
-        extract_nested_config(container_definition_config, :readiness)
+        extract_nested_config(kubernetes_definition_config, :readiness)
       end
 
       private
         def endpoint_config
-          extract_nested_config(container_definition_config, :endpoints)
+          extract_nested_config(kubernetes_definition_config, :endpoints)
         end
 
-        def container_definition_config
-          load_container_definition!
-          Rails.application.config.x.kubernetes_container || {}
+        def kubernetes_definition_config
+          load_kubernetes_definition!
+          Rails.application.config.x.kubernetes || {}
         end
 
-        def load_container_definition!
+        def load_kubernetes_definition!
           app_config = Rails.application.config
-          return if app_config.x.kubernetes_container_definition_loaded
+          return if app_config.x.kubernetes_definition_loaded
 
-          definition_file = Rails.root.join("config/container.rb")
+          definition_file = Rails.root.join("config/kubernetes.rb")
           load definition_file.to_s if definition_file.exist?
         ensure
-          app_config.x.kubernetes_container_definition_loaded = true
+          app_config.x.kubernetes_definition_loaded = true
         end
 
         def extract_nested_config(config, key)
