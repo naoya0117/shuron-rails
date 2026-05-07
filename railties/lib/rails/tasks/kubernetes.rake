@@ -34,6 +34,7 @@ namespace :kubernetes do
 
     liveness_path  = liveness[:path]  || liveness["path"]  || "/kubernetes/health/live"
     readiness_path = readiness[:path] || readiness["path"] || "/kubernetes/health/ready"
+    port           = ENV.fetch("PORT", 3000).to_s
 
     require "yaml"
 
@@ -41,16 +42,16 @@ namespace :kubernetes do
       "services" => {
         "web" => {
           "labels" => {
-            "kompose.controller.type"                         => "Deployment",
-            "kompose.service.type"                            => "ClusterIP",
-            "kompose.pod.liveness-probe.http-get.path"        => liveness_path,
-            "kompose.pod.liveness-probe.http-get.port"        => "3000",
+            "kompose.controller.type"                          => "Deployment",
+            "kompose.service.type"                             => "ClusterIP",
+            "kompose.pod.liveness-probe.http-get.path"         => liveness_path,
+            "kompose.pod.liveness-probe.http-get.port"         => port,
             "kompose.pod.liveness-probe.initial-delay-seconds" => "10",
-            "kompose.pod.liveness-probe.period-seconds"       => "10",
-            "kompose.pod.readiness-probe.http-get.path"       => readiness_path,
-            "kompose.pod.readiness-probe.http-get.port"       => "3000",
+            "kompose.pod.liveness-probe.period-seconds"        => "10",
+            "kompose.pod.readiness-probe.http-get.path"        => readiness_path,
+            "kompose.pod.readiness-probe.http-get.port"        => port,
             "kompose.pod.readiness-probe.initial-delay-seconds" => "5",
-            "kompose.pod.readiness-probe.period-seconds"      => "5"
+            "kompose.pod.readiness-probe.period-seconds"       => "5"
           }
         }
       }
