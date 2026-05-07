@@ -29,12 +29,11 @@ namespace :kubernetes do
   def generate_kubernetes_override(path)
     k8s = Rails.application.config.x.kubernetes || {}
 
-    liveness  = k8s[:liveness] || k8s["liveness"] || {}
+    liveness  = k8s[:liveness]  || k8s["liveness"]  || {}
     readiness = k8s[:readiness] || k8s["readiness"] || {}
-    endpoints = k8s[:endpoints] || k8s["endpoints"] || {}
 
-    liveness_path  = liveness[:path]  || liveness["path"]  || endpoints[:liveness_path]  || endpoints["liveness_path"]  || "/kubernetes/health/live"
-    readiness_path = readiness[:path] || readiness["path"] || endpoints[:readiness_path] || endpoints["readiness_path"] || "/kubernetes/health/ready"
+    liveness_path  = liveness[:path]  || liveness["path"]  || "/kubernetes/health/live"
+    readiness_path = readiness[:path] || readiness["path"] || "/kubernetes/health/ready"
 
     require "yaml"
 
