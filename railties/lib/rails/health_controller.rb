@@ -168,10 +168,10 @@ module Rails
         return "skipped" unless database_check_enabled?
         return "skipped" unless defined?(ActiveRecord::Base)
 
-        ready = Timeout.timeout(readiness_timeout_ms / 1000.0) do
-          ActiveRecord::Base.connection_pool.with_connection(&:active?)
+        Timeout.timeout(readiness_timeout_ms / 1000.0) do
+          ActiveRecord::Base.connection_pool.with_connection { |conn| conn.verify!; true }
         end
-        ready ? "ok" : "error"
+        "ok"
       rescue Exception
         "error"
       end

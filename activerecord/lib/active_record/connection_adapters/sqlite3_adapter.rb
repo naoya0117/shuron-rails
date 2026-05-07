@@ -240,10 +240,9 @@ module ActiveRecord
       end
 
       def active?
-        if connected?
-          verified!
-          true
-        end
+        return false unless connected?
+        verified!
+        true
       end
 
       alias :reset! :reconnect!
