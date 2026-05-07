@@ -79,7 +79,6 @@ module Rails
       template "Dockerfile"
       template "dockerignore", ".dockerignore"
       template "docker-compose.yml"
-      template "docker-compose.kubernetes-override.yml"
 
       template "docker-entrypoint", "bin/docker-entrypoint"
       chmod "bin/docker-entrypoint", 0755 & ~File.umask, verbose: false
