@@ -17,11 +17,13 @@ namespace :kubernetes do
     end
 
     override_file = "docker-compose.kubernetes-override.yml"
+    output_dir    = "k8s"
 
     FileUtils.rm_f(override_file) if File.exist?(override_file)
     generate_kubernetes_override(override_file)
 
-    sh "kompose convert -f docker-compose.yml -f #{override_file}"
+    FileUtils.mkdir_p(output_dir)
+    sh "kompose convert -f docker-compose.yml -f #{override_file} -o #{output_dir}"
   end
 
   private
