@@ -2,7 +2,9 @@ ARG RUBY_VERSION=3.3
 FROM docker.io/library/ruby:${RUBY_VERSION}-slim
 
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y build-essential git libyaml-dev pkg-config && \
+    apt-get install --no-install-recommends -y \
+      build-essential git libyaml-dev pkg-config \
+      libssl-dev libxml2-dev default-libmysqlclient-dev && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 WORKDIR /shuron-rails
