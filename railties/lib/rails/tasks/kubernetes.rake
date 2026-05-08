@@ -42,7 +42,7 @@ namespace :kubernetes do
       "services" => {
         "web" => {
           "labels" => {
-            "kompose.controller.type"                          => "Deployment",
+            "kompose.controller.type"                          => "deployment",
             "kompose.service.type"                             => "ClusterIP",
             "kompose.pod.liveness-probe.http-get.path"         => liveness_path,
             "kompose.pod.liveness-probe.http-get.port"         => port,
