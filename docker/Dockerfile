@@ -8,6 +8,7 @@ RUN apt-get update -qq && \
 WORKDIR /shuron-rails
 
 COPY Gemfile Gemfile.lock rails.gemspec RAILS_VERSION ./
+COPY tools/ ./tools/
 COPY railties/railties.gemspec ./railties/
 COPY actionpack/actionpack.gemspec ./actionpack/
 COPY actionview/actionview.gemspec ./actionview/
