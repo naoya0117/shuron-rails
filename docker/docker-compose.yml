@@ -1,0 +1,10 @@
+services:
+  rails:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    volumes:
+      - ..:/shuron-rails
+    working_dir: /shuron-rails
+    stdin_open: true
+    tty: true
