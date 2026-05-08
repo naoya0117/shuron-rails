@@ -1,6 +1,8 @@
 services:
   rails:
-    image: ghcr.io/naoya0117/shuron-rails:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     volumes:
       - ..:/shuron-rails
     working_dir: /shuron-rails
