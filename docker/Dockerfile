@@ -13,22 +13,16 @@ ENV PATH=/usr/local/bundle/bin:$PATH
 COPY . /shuron-rails
 WORKDIR /shuron-rails
 
-# Build each component gem from source
-RUN gem build activesupport/activesupport.gemspec && \
-    gem build activemodel/activemodel.gemspec && \
-    gem build actionview/actionview.gemspec && \
-    gem build actionpack/actionpack.gemspec && \
-    gem build activejob/activejob.gemspec && \
-    gem build activerecord/activerecord.gemspec && \
-    gem build actionmailer/actionmailer.gemspec && \
-    gem build activestorage/activestorage.gemspec && \
-    gem build actioncable/actioncable.gemspec && \
-    gem build actionmailbox/actionmailbox.gemspec && \
-    gem build actiontext/actiontext.gemspec && \
-    gem build railties/railties.gemspec && \
-    gem build rails.gemspec
+# Build each component gem from its own directory (gemspecs reference relative files)
+RUN mkdir /gems && \
+    for dir in activesupport activemodel actionview actionpack activejob activerecord \
+                actionmailer activestorage actioncable actionmailbox actiontext railties; do \
+      (cd $dir && gem build ${dir}.gemspec && mv *.gem /gems/); \
+    done && \
+    gem build rails.gemspec && mv *.gem /gems/
 
 # Install in dependency order so each step finds forked deps already installed
+WORKDIR /gems
 RUN gem install --no-document activesupport-*.gem && \
     gem install --no-document activemodel-*.gem && \
     gem install --no-document actionview-*.gem && \
