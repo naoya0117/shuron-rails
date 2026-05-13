@@ -50,7 +50,7 @@ ENV PATH=/usr/local/bundle/bin:$PATH
 
 COPY --from=gem-builder /usr/local/bundle /usr/local/bundle
 
-WORKDIR /rails
+WORKDIR /app
 
 # env -u GEM_PATH allows Ruby to find bundled gems (e.g. minitest) from the system path
 RUN env -u GEM_PATH rails new . --skip-bundle --force && \
