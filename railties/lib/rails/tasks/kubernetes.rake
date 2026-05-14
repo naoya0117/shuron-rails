@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "rails/kubernetes/override_builder"
+
 namespace :kubernetes do
   desc "Convert docker-compose.yml to Kubernetes manifests using Kompose"
   task convert: :environment do
@@ -33,6 +35,7 @@ namespace :kubernetes do
 
     liveness  = k8s[:liveness]  || k8s["liveness"]  || {}
     readiness = k8s[:readiness] || k8s["readiness"] || {}
+    resources = k8s[:resources] || k8s["resources"]
 
     liveness_path  = liveness[:path]  || liveness["path"]  || "/kubernetes/health/live"
     readiness_path = readiness[:path] || readiness["path"] || "/kubernetes/health/ready"
@@ -40,24 +43,25 @@ namespace :kubernetes do
 
     require "yaml"
 
-    override = {
-      "services" => {
-        "web" => {
-          "labels" => {
-            "kompose.controller.type"                          => "deployment",
-            "kompose.service.type"                             => "ClusterIP",
-            "kompose.pod.liveness-probe.http-get.path"         => liveness_path,
-            "kompose.pod.liveness-probe.http-get.port"         => port,
-            "kompose.pod.liveness-probe.initial-delay-seconds" => "10",
-            "kompose.pod.liveness-probe.period-seconds"        => "10",
-            "kompose.pod.readiness-probe.http-get.path"        => readiness_path,
-            "kompose.pod.readiness-probe.http-get.port"        => port,
-            "kompose.pod.readiness-probe.initial-delay-seconds" => "5",
-            "kompose.pod.readiness-probe.period-seconds"       => "5"
-          }
-        }
+    web_service = {
+      "labels" => {
+        "kompose.controller.type"                           => "deployment",
+        "kompose.service.type"                              => "ClusterIP",
+        "kompose.pod.liveness-probe.http-get.path"          => liveness_path,
+        "kompose.pod.liveness-probe.http-get.port"          => port,
+        "kompose.pod.liveness-probe.initial-delay-seconds"  => "10",
+        "kompose.pod.liveness-probe.period-seconds"         => "10",
+        "kompose.pod.readiness-probe.http-get.path"         => readiness_path,
+        "kompose.pod.readiness-probe.http-get.port"         => port,
+        "kompose.pod.readiness-probe.initial-delay-seconds" => "5",
+        "kompose.pod.readiness-probe.period-seconds"        => "5"
       }
     }
+
+    resource_deploy = Rails::Kubernetes::OverrideBuilder.build_resource_deploy(resources)
+    web_service["deploy"] = resource_deploy if resource_deploy
+
+    override = { "services" => { "web" => web_service } }
 
     File.write(path, YAML.dump(override))
     puts "Generated #{path} from config/kubernetes.rb"
