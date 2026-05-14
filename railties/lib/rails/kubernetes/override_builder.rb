@@ -51,7 +51,7 @@ module Rails
       def to_docker_memory(value)
         return nil if value.nil?
         str = value.to_s
-        unless str.match?(/\A\d+(\.\d+)?(Mi|Gi|M|G|Ki|K)?\z/)
+        unless str.match?(/\A\d+(\.\d+)?(Mi|Gi|M|G)?\z/)
           raise ArgumentError, "Invalid memory value: #{str.inspect}. Expected format: '256Mi' or '1Gi'"
         end
         str.sub("Mi", "M").sub("Gi", "G")
