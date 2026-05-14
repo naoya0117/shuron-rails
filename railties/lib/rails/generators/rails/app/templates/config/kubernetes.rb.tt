@@ -9,6 +9,12 @@ Rails.application.configure do
       path: "/kubernetes/health/ready",
       check_database: true,
       timeout_ms: Integer(ENV.fetch("KC_READINESS_TIMEOUT_MS", "300"))
+    },
+    resources: {
+      # CPU: request のみ設定。limits は設定しない（throttling 防止・Burstable QoS）
+      cpu: { request: "100m" },
+      # Memory: request == limit に設定（Guaranteed QoS でメモリ不足時の強制停止を防ぐ）
+      memory: { request: "256Mi", limit: "256Mi" }
     }
   }
 end
