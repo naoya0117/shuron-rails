@@ -28,8 +28,6 @@ namespace :kubernetes do
     sh "kompose convert -f docker-compose.yml -f #{override_file} -o #{output_dir}"
   end
 
-  private
-
   def generate_kubernetes_override(path)
     k8s = Rails.application.config.x.kubernetes || {}
 

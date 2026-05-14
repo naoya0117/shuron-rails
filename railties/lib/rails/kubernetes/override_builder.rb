@@ -52,7 +52,7 @@ module Rails
         return nil if value.nil?
         str = value.to_s
         unless str.match?(/\A\d+(\.\d+)?(Mi|Gi|M|G)?\z/)
-          raise ArgumentError, "Invalid memory value: #{str.inspect}. Expected format: '256Mi' or '1Gi'"
+          raise ArgumentError, "Invalid memory value: #{str.inspect}. Expected format: '256Mi', '1Gi', or '256M'"
         end
         str.sub("Mi", "M").sub("Gi", "G")
       end
