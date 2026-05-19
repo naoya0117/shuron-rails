@@ -2,6 +2,7 @@
 
 require "rails/kubernetes/override_builder"
 require "rails/kubernetes/config_loader"
+require "rails/kubernetes/manifest_annotator"
 
 namespace :kubernetes do
   desc "Convert docker-compose.yml to Kubernetes manifests using Kompose"
@@ -27,6 +28,8 @@ namespace :kubernetes do
 
     FileUtils.mkdir_p(output_dir)
     sh "kompose convert -f docker-compose.yml -f #{override_file} -o #{output_dir}"
+
+    annotate_manifests(output_dir)
   end
 
   def generate_kubernetes_override(path)
@@ -36,9 +39,11 @@ namespace :kubernetes do
     liveness  = k8s[:liveness]  || k8s["liveness"]  || {}
     readiness = k8s[:readiness] || k8s["readiness"] || {}
     resources = k8s[:resources] || k8s["resources"]
+    graceful  = k8s[:graceful_shutdown] || k8s["graceful_shutdown"] || {}
 
     liveness_path  = liveness[:path]  || liveness["path"]  || "/kubernetes/health/live"
     readiness_path = readiness[:path] || readiness["path"] || "/kubernetes/health/ready"
+    grace_period   = graceful[:grace_period] || graceful["grace_period"]
     port           = ENV.fetch("PORT", 3000).to_i
 
     require "yaml"
@@ -68,6 +73,8 @@ namespace :kubernetes do
       }
     }
 
+    web_service["stop_grace_period"] = grace_period if grace_period
+
     resource_deploy = Rails::Kubernetes::OverrideBuilder.build_resource_deploy(resources)
     web_service["deploy"] = resource_deploy if resource_deploy
 
@@ -75,5 +82,17 @@ namespace :kubernetes do
 
     File.write(path, YAML.dump(override))
     puts "Generated #{path} from config/kubernetes.rb"
+  end
+
+  def annotate_manifests(output_dir)
+    Rails::Kubernetes::ConfigLoader.load!
+    k8s = Rails.application.config.x.kubernetes || {}
+    graceful = k8s[:graceful_shutdown] || k8s["graceful_shutdown"] || {}
+    pre_stop_delay = graceful[:pre_stop_delay] || graceful["pre_stop_delay"] || "15s"
+
+    Dir.glob(File.join(output_dir, "*-deployment.yaml")).each do |path|
+      Rails::Kubernetes::ManifestAnnotator.annotate!(path, pre_stop_delay: pre_stop_delay)
+      puts "Annotated #{path}"
+    end
   end
 end
