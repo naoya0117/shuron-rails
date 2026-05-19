@@ -44,6 +44,13 @@ RUN apt-get update -qq && \
       curl libjemalloc2 libvips sqlite3 && \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
+# Kompose: convert docker-compose.yml -> Kubernetes manifests (used by `bin/rails kubernetes:convert`)
+ARG KOMPOSE_VERSION=v1.38.0
+ARG TARGETARCH
+RUN curl -fsSL -o /usr/local/bin/kompose \
+      "https://github.com/kubernetes/kompose/releases/download/${KOMPOSE_VERSION}/kompose-linux-${TARGETARCH}" && \
+    chmod +x /usr/local/bin/kompose
+
 ENV GEM_HOME=/usr/local/bundle
 ENV GEM_PATH=/usr/local/bundle
 ENV PATH=/usr/local/bundle/bin:$PATH
