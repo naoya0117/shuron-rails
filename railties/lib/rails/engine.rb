@@ -642,6 +642,7 @@ module Rails
 
     initializer :load_kubernetes_definition, before: :load_config_initializers do
       require "rails/kubernetes/config_loader"
+      require "rails/kubernetes/graceful_shutdown"
       Rails::Kubernetes::ConfigLoader.load!
     end
 
@@ -652,7 +653,6 @@ module Rails
     end
 
     initializer :kubernetes_graceful_shutdown, after: :load_config_initializers do
-      require "rails/kubernetes/graceful_shutdown"
       Rails::Kubernetes::GracefulShutdown.install!
     end
 
