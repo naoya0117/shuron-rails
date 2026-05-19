@@ -15,6 +15,19 @@ Rails.application.configure do
       cpu: { request: "100m" },
       # Memory: request == limit に設定（Guaranteed QoS でメモリ不足時の強制停止を防ぐ）
       memory: { request: "256Mi", limit: "256Mi" }
+    },
+    graceful_shutdown: {
+      # preStop で sleep する秒数。Service endpoint 削除の伝搬待ち
+      pre_stop_delay: "15s",
+      # terminationGracePeriodSeconds。SIGTERM〜SIGKILL の全体タイムアウト
+      grace_period: "60s"
     }
   }
 end
+
+# Register graceful shutdown hooks (optional). Hooks run when SIGTERM is received,
+# before Puma starts draining requests.
+#
+# Rails::Kubernetes::GracefulShutdown.on_shutdown do
+#   Sidekiq.shutdown if defined?(Sidekiq)
+# end
