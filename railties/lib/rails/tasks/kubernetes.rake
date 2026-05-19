@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails/kubernetes/override_builder"
+require "rails/kubernetes/config_loader"
 
 namespace :kubernetes do
   desc "Convert docker-compose.yml to Kubernetes manifests using Kompose"
@@ -29,6 +30,7 @@ namespace :kubernetes do
   end
 
   def generate_kubernetes_override(path)
+    Rails::Kubernetes::ConfigLoader.load!
     k8s = Rails.application.config.x.kubernetes || {}
 
     liveness  = k8s[:liveness]  || k8s["liveness"]  || {}

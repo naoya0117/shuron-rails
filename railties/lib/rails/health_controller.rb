@@ -2,6 +2,7 @@
 
 require "action_controller"
 require "timeout"
+require "rails/kubernetes/config_loader"
 
 module Rails
   # Built-in Health Check Endpoint
@@ -67,18 +68,8 @@ module Rails
 
       private
         def kubernetes_definition_config
-          load_kubernetes_definition!
+          Rails::Kubernetes::ConfigLoader.load!
           Rails.application.config.x.kubernetes || {}
-        end
-
-        def load_kubernetes_definition!
-          app_config = Rails.application.config
-          return if app_config.x.kubernetes_definition_loaded
-
-          definition_file = Rails.root.join("config/kubernetes.rb")
-          load definition_file.to_s if definition_file.exist?
-        ensure
-          app_config.x.kubernetes_definition_loaded = true
         end
 
         def extract_nested_config(config, key)
