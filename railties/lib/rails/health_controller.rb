@@ -64,22 +64,11 @@ module Rails
       end
 
       private
-        # Kubernetes-layer settings, read from +config.x.kubernetes+ as a plain
-        # Symbol-keyed Hash (see <tt>config/kubernetes.rb</tt>). The definition
-        # file is loaded once via #load_kubernetes_definition!.
+        # Kubernetes-layer settings as a plain Symbol-keyed Hash. The definition
+        # (<tt>config/kubernetes.rb</tt>) is loaded once at boot into
+        # +config.x.kubernetes+ by the +:load_kubernetes_definition+ initializer.
         def kubernetes_config
-          load_kubernetes_definition!
           Rails.application.config.x.kubernetes || {}
-        end
-
-        def load_kubernetes_definition!
-          app_config = Rails.application.config
-          return if app_config.x.kubernetes_definition_loaded
-
-          definition_file = Rails.root.join("config/kubernetes.rb")
-          load definition_file.to_s if definition_file.exist?
-        ensure
-          app_config.x.kubernetes_definition_loaded = true
         end
     end
 

@@ -4,6 +4,7 @@ require "active_support/core_ext/string/inflections"
 require "active_support/core_ext/array/conversions"
 require "active_support/descendants_tracker"
 require "active_support/dependencies"
+require "rails/kubernetes"
 
 module Rails
   class Application
@@ -135,6 +136,17 @@ module Rails
             app.executor.register_hook(InterlockHook, outer: true)
           end
         end
+      end
+
+      # Loads the Kubernetes-layer definition (<tt>config/kubernetes.rb</tt>)
+      # once at boot, and records the detected platform, so the layer's
+      # features can read +config.x.kubernetes+ without each loading the file.
+      initializer :load_kubernetes_definition do |app|
+        definition = Rails.root.join("config/kubernetes.rb")
+        load definition.to_s if definition.exist?
+
+        app.config.x.kubernetes ||= {}
+        app.config.x.kubernetes[:platform] ||= Rails::Kubernetes.platform
       end
 
       initializer :add_internal_routes do |app|
