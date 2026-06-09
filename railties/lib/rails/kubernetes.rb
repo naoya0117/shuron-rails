@@ -11,6 +11,11 @@ module Rails
     # Platforms the Kubernetes layer knows how to adapt to.
     PLATFORMS = %i[kubernetes compose local].freeze
 
+    # A diagnostic check registered by a Kubernetes-layer feature. +block+ is
+    # expected to return a problem message (String) when something the feature
+    # needs is missing/unconfigured, or +nil+ when everything is in order.
+    Check = Struct.new(:name, :severity, :block)
+
     class << self
       # Detects the runtime platform, used by the layer to absorb
       # platform-specific differences:
@@ -28,6 +33,36 @@ module Rails
           :local
         else
           :kubernetes
+        end
+      end
+
+      # Registers a diagnostic check for a Kubernetes-layer feature. The +block+
+      # returns a problem message when the feature is missing/unconfigured, or
+      # +nil+ when satisfied. Reported by Rails::Kubernetes.run_checks (see the
+      # diagnostics feature, +bin/rails kubernetes:doctor+).
+      def register_check(name, severity: :warn, &block)
+        checks << Check.new(name, severity, block)
+        name
+      end
+
+      # All registered checks.
+      def checks
+        @checks ||= []
+      end
+
+      # Empties the check registry (used between boots/tests).
+      def clear_checks
+        @checks = []
+      end
+
+      # Runs every registered check and returns one entry per check that
+      # reported a problem: <tt>{ name:, severity:, message: }</tt>.
+      def run_checks
+        checks.filter_map do |check|
+          message = check.block.call
+          next if message.nil?
+
+          { name: check.name, severity: check.severity, message: message }
         end
       end
     end

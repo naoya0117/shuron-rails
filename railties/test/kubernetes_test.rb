@@ -42,3 +42,39 @@ class Rails::KubernetesPlatformTest < ActiveSupport::TestCase
     assert_equal :kubernetes, Rails::Kubernetes.platform
   end
 end
+
+class Rails::KubernetesCheckRegistryTest < ActiveSupport::TestCase
+  setup { Rails::Kubernetes.clear_checks }
+  teardown { Rails::Kubernetes.clear_checks }
+
+  test "register_check stores a named check" do
+    Rails::Kubernetes.register_check(:health) { nil }
+    assert_equal [:health], Rails::Kubernetes.checks.map(&:name)
+  end
+
+  test "a check defaults to :warn severity" do
+    Rails::Kubernetes.register_check(:health) { nil }
+    assert_equal :warn, Rails::Kubernetes.checks.first.severity
+  end
+
+  test "run_checks reports only checks whose block returns a problem message" do
+    Rails::Kubernetes.register_check(:ok_check) { nil }
+    Rails::Kubernetes.register_check(:bad_check, severity: :warn) { "graceful shutdown not configured" }
+    Rails::Kubernetes.register_check(:info_check, severity: :info) { "pod identity not logged" }
+
+    results = Rails::Kubernetes.run_checks
+
+    assert_equal 2, results.size
+    bad = results.find { |r| r[:name] == :bad_check }
+    assert_equal :warn, bad[:severity]
+    assert_equal "graceful shutdown not configured", bad[:message]
+    assert_includes results.map { |r| r[:name] }, :info_check
+    assert_not_includes results.map { |r| r[:name] }, :ok_check
+  end
+
+  test "clear_checks empties the registry" do
+    Rails::Kubernetes.register_check(:health) { nil }
+    Rails::Kubernetes.clear_checks
+    assert_empty Rails::Kubernetes.checks
+  end
+end
