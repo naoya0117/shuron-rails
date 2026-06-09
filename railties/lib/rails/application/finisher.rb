@@ -139,14 +139,11 @@ module Rails
       end
 
       # Loads the Kubernetes-layer definition (<tt>config/kubernetes.rb</tt>)
-      # once at boot, and records the detected platform, so the layer's
-      # features can read +config.x.kubernetes+ without each loading the file.
+      # once at boot and records the detected platform, so the layer's features
+      # can read +config.x.kubernetes+. Lookups made before this runs fall back
+      # to the same loader lazily (see Rails::Kubernetes.definition).
       initializer :load_kubernetes_definition do |app|
-        definition = Rails.root.join("config/kubernetes.rb")
-        load definition.to_s if definition.exist?
-
-        app.config.x.kubernetes ||= {}
-        app.config.x.kubernetes[:platform] ||= Rails::Kubernetes.platform
+        Rails::Kubernetes.load_definition!
       end
 
       initializer :add_internal_routes do |app|

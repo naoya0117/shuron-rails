@@ -78,3 +78,14 @@ class Rails::KubernetesCheckRegistryTest < ActiveSupport::TestCase
     assert_empty Rails::Kubernetes.checks
   end
 end
+
+class Rails::KubernetesDefinitionTest < ActiveSupport::TestCase
+  test "definition returns an already-populated config without reloading" do
+    original = Rails.application.config.x.kubernetes
+    Rails.application.config.x.kubernetes = { readiness: { path: "/already" } }
+
+    assert_equal "/already", Rails::Kubernetes.definition.dig(:readiness, :path)
+  ensure
+    Rails.application.config.x.kubernetes = original
+  end
+end

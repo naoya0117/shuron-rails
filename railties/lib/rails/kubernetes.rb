@@ -36,6 +36,26 @@ module Rails
         end
       end
 
+      # Returns the Kubernetes-layer settings (+config.x.kubernetes+),
+      # loading +config/kubernetes.rb+ on first access if it has not been
+      # populated yet. Once populated (at boot or by an earlier lookup) the
+      # existing Hash is returned untouched, so it is safe to call repeatedly
+      # and from boot-time consumers running before the boot initializer.
+      def definition
+        Rails.application.config.x.kubernetes || load_definition!
+      end
+
+      # Loads +config/kubernetes.rb+ (when present) into +config.x.kubernetes+
+      # and records the detected platform. Returns the settings Hash.
+      def load_definition!
+        file = Rails.root.join("config/kubernetes.rb")
+        load file.to_s if file.exist?
+
+        config = (Rails.application.config.x.kubernetes ||= {})
+        config[:platform] ||= platform
+        config
+      end
+
       # Registers a diagnostic check for a Kubernetes-layer feature. The +block+
       # returns a problem message when the feature is missing/unconfigured, or
       # +nil+ when satisfied. Reported by Rails::Kubernetes.run_checks (see the

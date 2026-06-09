@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
 require "isolation/abstract_unit"
+require "rack/test"
 
 module ApplicationTests
   class KubernetesTest < ActiveSupport::TestCase
     include ActiveSupport::Testing::Isolation
+    include Rack::Test::Methods
 
     def setup
       build_app
@@ -32,6 +34,19 @@ module ApplicationTests
 
       assert_includes Rails::Kubernetes::PLATFORMS,
         Rails.application.config.x.kubernetes[:platform]
+    end
+
+    test "a custom liveness path in config/kubernetes.rb drives the registered route" do
+      app_file "config/kubernetes.rb", <<-RUBY
+        Rails.application.configure do
+          config.x.kubernetes = { liveness: { path: "/health/livez" } }
+        end
+      RUBY
+
+      app "development"
+
+      get "/health/livez"
+      assert_equal 200, last_response.status
     end
   end
 end

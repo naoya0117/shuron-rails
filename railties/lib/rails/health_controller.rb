@@ -2,6 +2,7 @@
 
 require "action_controller"
 require "timeout"
+require "rails/kubernetes"
 
 module Rails
   # Built-in Health Check Endpoint
@@ -64,11 +65,10 @@ module Rails
       end
 
       private
-        # Kubernetes-layer settings as a plain Symbol-keyed Hash. The definition
-        # (<tt>config/kubernetes.rb</tt>) is loaded once at boot into
-        # +config.x.kubernetes+ by the +:load_kubernetes_definition+ initializer.
+        # Kubernetes-layer settings as a plain Symbol-keyed Hash, loaded from
+        # <tt>config/kubernetes.rb</tt> at boot (or lazily on first lookup).
         def kubernetes_config
-          Rails.application.config.x.kubernetes || {}
+          Rails::Kubernetes.definition
         end
     end
 
