@@ -46,14 +46,24 @@ module Rails
       end
 
       # Loads +config/kubernetes.rb+ (when present) into +config.x.kubernetes+
-      # and records the detected platform. Returns the settings Hash.
+      # and records the detected platform. Returns the settings Hash. The file
+      # is read at most once, so a lazy lookup followed by the boot initializer
+      # does not execute the definition (and its register_check calls) twice.
       def load_definition!
-        file = Rails.root.join("config/kubernetes.rb")
-        load file.to_s if file.exist?
+        unless @definition_loaded
+          file = Rails.root.join("config/kubernetes.rb")
+          load file.to_s if file.exist?
+          @definition_loaded = true
+        end
 
         config = (Rails.application.config.x.kubernetes ||= {})
         config[:platform] ||= platform
         config
+      end
+
+      # Resets the one-time load guard (intended for tests).
+      def reset_definition!
+        @definition_loaded = false
       end
 
       # Registers a diagnostic check for a Kubernetes-layer feature. The +block+

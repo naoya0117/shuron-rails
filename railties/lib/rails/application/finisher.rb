@@ -140,9 +140,11 @@ module Rails
 
       # Loads the Kubernetes-layer definition (<tt>config/kubernetes.rb</tt>)
       # once at boot and records the detected platform, so the layer's features
-      # can read +config.x.kubernetes+. Lookups made before this runs fall back
-      # to the same loader lazily (see Rails::Kubernetes.definition).
-      initializer :load_kubernetes_definition do |app|
+      # can read +config.x.kubernetes+. Runs before eager loading and
+      # +config.after_initialize+ so boot-time consumers observe it. Lookups
+      # made even earlier fall back to the same loader lazily, and the loader
+      # only reads the file once (see Rails::Kubernetes.definition).
+      initializer :load_kubernetes_definition, before: :eager_load! do |app|
         Rails::Kubernetes.load_definition!
       end
 
