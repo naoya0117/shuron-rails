@@ -28,13 +28,11 @@ module Rails
   #
   # \Rails also auto-registers +rails/health#live+ as +rails_liveness_check+.
   # Configure its path in <tt>"config/kubernetes.rb"</tt> with
-  # <tt>config.x.kubernetes.liveness.path</tt> (or
-  # <tt>config.x.kubernetes.endpoints.liveness_path</tt>).
+  # <tt>config.x.kubernetes[:liveness][:path]</tt>.
   #
   # \Rails also auto-registers +rails/health#ready+ as +rails_readiness_check+.
   # Configure its path in <tt>"config/kubernetes.rb"</tt> with
-  # <tt>config.x.kubernetes.readiness.path</tt> (or
-  # <tt>config.x.kubernetes.endpoints.readiness_path</tt>).
+  # <tt>config.x.kubernetes[:readiness][:path]</tt>.
   #
   # NOTE: This endpoint does not reflect the status of all of your application's
   # dependencies, such as the database or Redis cluster. Replace
@@ -50,23 +48,26 @@ module Rails
 
     class << self
       def liveness_path
-        read_config_value(liveness_config, :path).presence || "/kubernetes/health/live"
+        liveness_config[:path].presence || "/kubernetes/health/live"
       end
 
       def readiness_path
-        read_config_value(readiness_config, :path).presence || "/kubernetes/health/ready"
+        readiness_config[:path].presence || "/kubernetes/health/ready"
       end
 
       def liveness_config
-        extract_nested_config(kubernetes_definition_config, :liveness)
+        kubernetes_config[:liveness] || {}
       end
 
       def readiness_config
-        extract_nested_config(kubernetes_definition_config, :readiness)
+        kubernetes_config[:readiness] || {}
       end
 
       private
-        def kubernetes_definition_config
+        # Kubernetes-layer settings, read from +config.x.kubernetes+ as a plain
+        # Symbol-keyed Hash (see <tt>config/kubernetes.rb</tt>). The definition
+        # file is loaded once via #load_kubernetes_definition!.
+        def kubernetes_config
           load_kubernetes_definition!
           Rails.application.config.x.kubernetes || {}
         end
@@ -79,26 +80,6 @@ module Rails
           load definition_file.to_s if definition_file.exist?
         ensure
           app_config.x.kubernetes_definition_loaded = true
-        end
-
-        def extract_nested_config(config, key)
-          return {} unless config
-
-          nested = if config.respond_to?(:[])
-            config[key] || config[key.to_s]
-          end
-          nested ||= config.public_send(key) if config.respond_to?(key)
-          nested || {}
-        end
-
-        def read_config_value(config, key)
-          return nil unless config
-
-          value = if config.respond_to?(:[])
-            config[key] || config[key.to_s]
-          end
-          value ||= config.public_send(key) if config.respond_to?(key)
-          value
         end
     end
 
@@ -165,24 +146,16 @@ module Rails
       end
 
       def database_check_enabled?
-        check_database = readiness_setting(:check_database)
-        return true if check_database.nil?
-        return check_database == "true" if check_database.is_a?(String)
-
-        check_database
+        check_database = readiness_config[:check_database]
+        check_database.nil? ? true : check_database
       end
 
       def readiness_timeout_ms
-        timeout_ms = readiness_setting(:timeout_ms)
-        timeout_ms.present? ? timeout_ms.to_i : 300
+        (readiness_config[:timeout_ms] || 300).to_i
       end
 
       def readiness_config
         self.class.readiness_config
-      end
-
-      def readiness_setting(key)
-        self.class.send(:read_config_value, readiness_config, key)
       end
 
       def html_status(color:)

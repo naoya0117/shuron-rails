@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "abstract_unit"
+require "minitest/mock"
 
 class HealthControllerTest < ActionController::TestCase
   tests Rails::HealthController
@@ -67,7 +68,7 @@ class HealthControllerTest < ActionController::TestCase
   test "health controller returns JSON readiness success response" do
     pool = Object.new
     connection = Object.new
-    connection.define_singleton_method(:active?) { true }
+    connection.define_singleton_method(:verify!) { true }
     pool.define_singleton_method(:with_connection) { |&block| block.call(connection) }
 
     ActiveRecord::Base.stub(:connection_pool, pool) do
@@ -87,7 +88,7 @@ class HealthControllerTest < ActionController::TestCase
   test "health controller returns JSON readiness error response when database is unavailable" do
     pool = Object.new
     connection = Object.new
-    connection.define_singleton_method(:active?) { false }
+    connection.define_singleton_method(:verify!) { raise ActiveRecord::ConnectionNotEstablished, "db inactive" }
     pool.define_singleton_method(:with_connection) { |&block| block.call(connection) }
 
     ActiveRecord::Base.stub(:connection_pool, pool) do
@@ -123,8 +124,10 @@ class HealthControllerTest < ActionController::TestCase
   end
 
   test "health controller returns JSON readiness success response when database check is disabled" do
-    original_config = Rails.application.config.x.kubernetes_container
-    Rails.application.config.x.kubernetes_container = { readiness: { check_database: false } }
+    original_config = Rails.application.config.x.kubernetes
+    original_loaded_flag = Rails.application.config.x.kubernetes_definition_loaded
+    Rails.application.config.x.kubernetes = { readiness: { check_database: false } }
+    Rails.application.config.x.kubernetes_definition_loaded = true
 
     get :ready, format: :json
 
@@ -137,44 +140,32 @@ class HealthControllerTest < ActionController::TestCase
     assert_includes json_response, "timestamp"
     assert_match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, json_response["timestamp"])
   ensure
-    Rails.application.config.x.kubernetes_container = original_config
+    Rails.application.config.x.kubernetes = original_config
+    Rails.application.config.x.kubernetes_definition_loaded = original_loaded_flag
   end
 
   test "health controller readiness path can be configured via container definition" do
-    original_config = Rails.application.config.x.kubernetes_container
-    original_loaded_flag = Rails.application.config.x.kubernetes_container_definition_loaded
-    Rails.application.config.x.kubernetes_container = { readiness: { path: "/health/readyz" } }
-    Rails.application.config.x.kubernetes_container_definition_loaded = true
+    original_config = Rails.application.config.x.kubernetes
+    original_loaded_flag = Rails.application.config.x.kubernetes_definition_loaded
+    Rails.application.config.x.kubernetes = { readiness: { path: "/health/readyz" } }
+    Rails.application.config.x.kubernetes_definition_loaded = true
 
     assert_equal "/health/readyz", Rails::HealthController.readiness_path
   ensure
-    Rails.application.config.x.kubernetes_container = original_config
-    Rails.application.config.x.kubernetes_container_definition_loaded = original_loaded_flag
+    Rails.application.config.x.kubernetes = original_config
+    Rails.application.config.x.kubernetes_definition_loaded = original_loaded_flag
   end
 
   test "health controller liveness path can be configured via container definition" do
-    original_config = Rails.application.config.x.kubernetes_container
-    original_loaded_flag = Rails.application.config.x.kubernetes_container_definition_loaded
-    Rails.application.config.x.kubernetes_container = { liveness: { path: "/health/livez" } }
-    Rails.application.config.x.kubernetes_container_definition_loaded = true
+    original_config = Rails.application.config.x.kubernetes
+    original_loaded_flag = Rails.application.config.x.kubernetes_definition_loaded
+    Rails.application.config.x.kubernetes = { liveness: { path: "/health/livez" } }
+    Rails.application.config.x.kubernetes_definition_loaded = true
 
     assert_equal "/health/livez", Rails::HealthController.liveness_path
   ensure
-    Rails.application.config.x.kubernetes_container = original_config
-    Rails.application.config.x.kubernetes_container_definition_loaded = original_loaded_flag
+    Rails.application.config.x.kubernetes = original_config
+    Rails.application.config.x.kubernetes_definition_loaded = original_loaded_flag
   end
 
-  test "health controller accepts string keys in container readiness configuration" do
-    original_config = Rails.application.config.x.kubernetes_container
-    Rails.application.config.x.kubernetes_container = { "readiness" => { "check_database" => false } }
-
-    get :ready, format: :json
-
-    assert_response :success
-    json_response = JSON.parse(@response.body)
-    assert_equal "ready", json_response["status"]
-    assert_equal "skipped", json_response.dig("checks", "database")
-  ensure
-    Rails.application.config.x.kubernetes_container = original_config
-  end
 end
