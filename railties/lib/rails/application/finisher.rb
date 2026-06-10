@@ -149,16 +149,23 @@ module Rails
       end
 
       # Managed Lifecycle: run the application's registered graceful-shutdown
-      # hooks on SIGTERM (chaining any handler already installed, e.g. the app
-      # server's), and register the "no shutdown hook" diagnostic.
+      # hooks and register the "no shutdown hook" diagnostic.
       initializer :setup_kubernetes_lifecycle do |app|
+        # Primary path: the app server (e.g. Puma) handles SIGTERM itself,
+        # drains in-flight requests and then exits normally. at_exit runs the
+        # cleanup at that point, so we do not fight the server's own TERM trap
+        # (which is installed after boot and would otherwise replace ours).
+        at_exit { Rails::Kubernetes.run_shutdown! }
+
+        # Best-effort fallback for processes without a server signal handler
+        # (rake tasks, custom runners): handle SIGTERM directly, chaining any
+        # handler already installed. run_shutdown! is idempotent.
         previous_handler = Signal.trap("TERM") do |signo|
           Rails::Kubernetes.run_shutdown!
-          case previous_handler
-          when "IGNORE", "SIG_IGN"
-            # A previous handler deliberately ignored TERM; preserve that.
-          when Proc, Method
+          if previous_handler.respond_to?(:call)
             previous_handler.call(signo)
+          elsif previous_handler == "IGNORE" || previous_handler == "SIG_IGN"
+            # A previous handler deliberately ignored TERM; preserve that.
           else
             # "DEFAULT"/"SYSTEM_DEFAULT"/nil: terminate after cleanup.
             exit
