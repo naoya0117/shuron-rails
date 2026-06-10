@@ -151,30 +151,28 @@ module Rails
       # Managed Lifecycle: run the application's registered graceful-shutdown
       # hooks and register the "no shutdown hook" diagnostic.
       initializer :setup_kubernetes_lifecycle do |app|
-        # Primary path: the app server (e.g. Puma) handles SIGTERM itself,
-        # drains in-flight requests and then exits normally. at_exit runs the
-        # cleanup at that point, so we do not fight the server's own TERM trap
-        # (which is installed after boot and would otherwise replace ours).
-        at_exit { Rails::Kubernetes.run_shutdown! }
+        # Cleanup runs once, on normal process exit, for this application. This
+        # covers the app server (e.g. Puma) draining and exiting, and any TERM
+        # handler that stops the run loop and lets the process exit normally,
+        # without fighting the server's own TERM trap (installed after boot).
+        at_exit { Rails::Kubernetes.run_shutdown!(app) }
 
-        # Best-effort fallback for processes without a server signal handler
-        # (rake tasks, custom runners): handle SIGTERM directly, chaining any
-        # handler already installed. run_shutdown! is idempotent.
+        # Fallback for processes without a server signal handler (rake tasks,
+        # custom runners), chaining any handler already installed.
         previous_handler = Signal.trap("TERM") do |signo|
           if previous_handler == "IGNORE" || previous_handler == "SIG_IGN"
-            # TERM was deliberately ignored: keep running and do not run cleanup,
-            # so the live process is not left partially shut down.
+            # Deliberately ignored: keep running, do not clean up.
+          elsif previous_handler.respond_to?(:call)
+            # Let the existing handler drive shutdown; our cleanup runs from
+            # at_exit when the process actually exits, so it is not run early.
+            previous_handler.call(signo)
           else
-            Rails::Kubernetes.run_shutdown!
-            if previous_handler.respond_to?(:call)
-              previous_handler.call(signo)
-            else
-              # "DEFAULT"/"SYSTEM_DEFAULT"/nil: terminate *as if* by the signal
-              # so supervisors/Kubernetes Jobs still see a signal exit status,
-              # not a success.
-              Signal.trap("TERM", "DEFAULT")
-              Process.kill("TERM", Process.pid)
-            end
+            # "DEFAULT"/"SYSTEM_DEFAULT"/nil: a signal exit skips at_exit, so run
+            # cleanup here, then re-raise TERM so supervisors / Kubernetes Jobs
+            # still see a signal exit status rather than success.
+            Rails::Kubernetes.run_shutdown!(app)
+            Signal.trap("TERM", "DEFAULT")
+            Process.kill("TERM", Process.pid)
           end
         end
 

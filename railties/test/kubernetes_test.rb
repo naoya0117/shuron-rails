@@ -119,20 +119,22 @@ class Rails::KubernetesLifecycleTest < ActiveSupport::TestCase
   end
 
   test "managed_lifecycle_problem warns on kubernetes without shutdown hooks" do
+    original = ENV["KC_PLATFORM"]
     ENV["KC_PLATFORM"] = "kubernetes"
     assert Rails::Kubernetes.managed_lifecycle_problem
 
     Rails::Kubernetes.on_shutdown(:cleanup) { }
     assert_nil Rails::Kubernetes.managed_lifecycle_problem
   ensure
-    ENV.delete("KC_PLATFORM")
+    ENV["KC_PLATFORM"] = original
   end
 
   test "managed_lifecycle_problem is silent off kubernetes" do
+    original = ENV["KC_PLATFORM"]
     ENV["KC_PLATFORM"] = "local"
     assert_nil Rails::Kubernetes.managed_lifecycle_problem
   ensure
-    ENV.delete("KC_PLATFORM")
+    ENV["KC_PLATFORM"] = original
   end
 end
 

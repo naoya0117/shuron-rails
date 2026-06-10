@@ -125,10 +125,12 @@ module Rails
         reg[:shutdown_ran] = false
       end
 
-      # Runs every shutdown hook once, in registration order. A failing hook is
-      # logged and does not prevent the remaining cleanup from running.
-      def run_shutdown!
-        reg = registry
+      # Runs every shutdown hook for +app+ once, in registration order. A
+      # failing hook is logged and does not prevent the remaining cleanup from
+      # running. +app+ is passed explicitly by deferred callers (e.g. at_exit)
+      # so the right application's hooks run even if Rails.application changed.
+      def run_shutdown!(app = Rails.application)
+        reg = registry(app)
         return if reg[:shutdown_ran]
         reg[:shutdown_ran] = true
 
@@ -154,10 +156,10 @@ module Rails
           Rails.application.config
         end
 
-        # Per-application mutable state, keyed on the current Rails.application
-        # so a different app/root in the same process is fully isolated.
-        def registry
-          (@registries ||= {})[Rails.application] ||=
+        # Per-application mutable state, keyed on the application object so a
+        # different app/root in the same process is fully isolated.
+        def registry(app = Rails.application)
+          (@registries ||= {})[app] ||=
             { loaded: false, checks: [], shutdown_hooks: [], shutdown_ran: false }
         end
     end
