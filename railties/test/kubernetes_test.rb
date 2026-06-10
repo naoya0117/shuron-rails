@@ -138,6 +138,45 @@ class Rails::KubernetesLifecycleTest < ActiveSupport::TestCase
   end
 end
 
+class Rails::KubernetesSelfAwarenessTest < ActiveSupport::TestCase
+  SELF_ENV = %w[POD_NAME POD_NAMESPACE NODE_NAME POD_IP POD_SERVICE_ACCOUNT KC_PLATFORM].freeze
+
+  setup { @saved = ENV.slice(*SELF_ENV); SELF_ENV.each { |k| ENV.delete(k) } }
+  teardown { SELF_ENV.each { |k| ENV.delete(k) }; @saved.each { |k, v| ENV[k] = v } }
+
+  test "self_info exposes injected Downward API values" do
+    ENV["POD_NAME"] = "web-abc"
+    ENV["POD_NAMESPACE"] = "prod"
+    ENV["NODE_NAME"] = "node-1"
+
+    info = Rails::Kubernetes.self_info
+
+    assert_equal "web-abc", info.pod_name
+    assert_equal "prod", info.namespace
+    assert_equal "node-1", info.node_name
+  end
+
+  test "self_info is nil-valued when nothing is injected (Docker/local)" do
+    info = Rails::Kubernetes.self_info
+
+    assert_nil info.pod_name
+    assert_nil info.namespace
+  end
+
+  test "self_awareness_problem warns on kubernetes when Downward API is absent" do
+    ENV["KC_PLATFORM"] = "kubernetes"
+    assert Rails::Kubernetes.self_awareness_problem
+
+    ENV["POD_NAME"] = "web-abc"
+    assert_nil Rails::Kubernetes.self_awareness_problem
+  end
+
+  test "self_awareness_problem is silent off kubernetes" do
+    ENV["KC_PLATFORM"] = "local"
+    assert_nil Rails::Kubernetes.self_awareness_problem
+  end
+end
+
 class Rails::KubernetesDefinitionTest < ActiveSupport::TestCase
   test "definition returns an already-populated config without reloading" do
     original = Rails.application.config.x.kubernetes

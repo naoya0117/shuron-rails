@@ -163,6 +163,10 @@ module Rails
         Rails::Kubernetes.register_check(:managed_lifecycle, severity: :warn) do
           Rails::Kubernetes.managed_lifecycle_problem
         end
+
+        Rails::Kubernetes.register_check(:self_awareness, severity: :warn) do
+          Rails::Kubernetes.self_awareness_problem
+        end
       end
 
       initializer :add_internal_routes do |app|

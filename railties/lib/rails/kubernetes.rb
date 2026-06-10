@@ -20,6 +20,12 @@ module Rails
     # application runs when the process is asked to terminate (SIGTERM).
     ShutdownHook = Struct.new(:name, :block)
 
+    # Self Awareness: the pod's own metadata, injected by the Kubernetes
+    # Downward API as environment variables. All fields are +nil+ when not
+    # injected (e.g. local/Docker), which is how the layer absorbs the
+    # difference between platforms.
+    SelfInfo = Struct.new(:pod_name, :namespace, :node_name, :pod_ip, :service_account, keyword_init: true)
+
     class << self
       # Detects the runtime platform, used by the layer to absorb
       # platform-specific differences:
@@ -151,6 +157,29 @@ module Rails
         return unless shutdown_hooks.empty?
 
         "no graceful-shutdown hooks registered (use Rails::Kubernetes.on_shutdown)"
+      end
+
+      # Self Awareness: the pod's own metadata from the Downward API
+      # environment variables (POD_NAME, POD_NAMESPACE, NODE_NAME, POD_IP,
+      # POD_SERVICE_ACCOUNT). Values are +nil+ when not injected (local/Docker).
+      def self_info
+        SelfInfo.new(
+          pod_name: ENV["POD_NAME"],
+          namespace: ENV["POD_NAMESPACE"],
+          node_name: ENV["NODE_NAME"],
+          pod_ip: ENV["POD_IP"],
+          service_account: ENV["POD_SERVICE_ACCOUNT"]
+        )
+      end
+
+      # Diagnostic (Self Awareness): on Kubernetes, none of the Downward API
+      # identity variables being present usually means the manifest forgot to
+      # inject them. Returns a problem message or +nil+.
+      def self_awareness_problem
+        return unless platform == :kubernetes
+        return if ENV["POD_NAME"] || ENV["POD_NAMESPACE"] || ENV["NODE_NAME"]
+
+        "Downward API identity not injected (POD_NAME/POD_NAMESPACE/NODE_NAME); check the manifest"
       end
 
       private
