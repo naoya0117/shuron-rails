@@ -52,6 +52,16 @@ module ApplicationTests
         Rails.application.config.x.kubernetes[:readiness][:check_database]
     end
 
+    test "on_shutdown hooks registered in an initializer survive boot" do
+      app_file "config/initializers/register_shutdown.rb", <<-RUBY
+        Rails::Kubernetes.on_shutdown(:from_initializer) { }
+      RUBY
+
+      app "development"
+
+      assert_includes Rails::Kubernetes.shutdown_hooks.map(&:name), :from_initializer
+    end
+
     test "a custom liveness path in config/kubernetes.rb drives the registered route" do
       app_file "config/kubernetes.rb", <<-RUBY
         Rails.application.configure do

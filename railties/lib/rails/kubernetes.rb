@@ -41,46 +41,36 @@ module Rails
       end
 
       # Returns the Kubernetes-layer settings (+config.x.kubernetes+), loading
-      # +config/kubernetes.rb+ on first access for the current application if it
-      # has not been loaded yet. The load guard (not the value) is checked,
-      # because +config.x+ auto-vivifies missing keys to a truthy empty
-      # OrderedOptions, which would otherwise mask "not loaded yet".
+      # +config/kubernetes.rb+ on first access for the current application.
       def definition
-        load_definition! unless @loaded_app.equal?(Rails.application)
-        Rails.application.config.x.kubernetes || {}
+        load_definition!
       end
 
       # Loads +config/kubernetes.rb+ (when present) into +config.x.kubernetes+
       # and records the detected platform. Returns the settings Hash.
       #
-      # The file is read at most once per application instance: a lazy lookup
-      # followed by the boot initializer does not execute the definition (and
-      # its register_check calls) twice. The guard is keyed on the current
-      # +Rails.application+ object, so a different application in the same
-      # process (even for the same root) loads its own definition and starts
-      # from a clean check registry.
+      # All mutable state (load guard, checks, shutdown hooks) lives in a
+      # per-application registry, so the file is read at most once per app and a
+      # second application in the same process keeps its own registrations
+      # (including ones made in initializers before this runs).
       def load_definition!
-        app = Rails.application
+        reg = registry
 
-        unless @loaded_app.equal?(app)
-          # Reset per-application state so a different app in the same process
-          # starts clean (checks and shutdown hooks are module-level).
-          clear_checks
-          clear_shutdown_hooks
+        unless reg[:loaded]
           # config/kubernetes.rb is the single definition window; environment
-          # differences belong inside it (it is generated using ENV, e.g.
+          # differences belong inside it (generated using ENV, e.g.
           # Integer(ENV.fetch("KC_READINESS_TIMEOUT_MS", "300"))). Setting
-          # config.x.kubernetes inline instead therefore takes full control and
-          # suppresses the file (no partial merge). +present?+, not truthiness,
-          # because config.x auto-vivifies an empty OrderedOptions.
-          unless app.config.x.kubernetes.present?
+          # config.x.kubernetes inline instead takes full control and suppresses
+          # the file (no partial merge). +present?+, not truthiness, because
+          # config.x auto-vivifies an empty OrderedOptions.
+          unless app_config.x.kubernetes.present?
             file = Rails.root.join("config/kubernetes.rb")
             load file.to_s if file.exist?
           end
-          @loaded_app = app
+          reg[:loaded] = true
         end
 
-        config = (app.config.x.kubernetes ||= {})
+        config = (app_config.x.kubernetes ||= {})
         config[:platform] ||= platform
         config
       end
@@ -94,14 +84,14 @@ module Rails
         name
       end
 
-      # All registered checks.
+      # All registered checks (for the current application).
       def checks
-        @checks ||= []
+        registry[:checks]
       end
 
       # Empties the check registry (used between boots/tests).
       def clear_checks
-        @checks = []
+        registry[:checks] = []
       end
 
       # Runs every registered check and returns one entry per check that
@@ -117,31 +107,32 @@ module Rails
 
       # Registers a graceful-shutdown hook (Managed Lifecycle). The +block+ is
       # the application's cleanup, run (once, in registration order) when the
-      # process receives SIGTERM. See the :install_kubernetes_signal_handlers
-      # initializer.
+      # process receives SIGTERM. See the :setup_kubernetes_lifecycle initializer.
       def on_shutdown(name, &block)
         shutdown_hooks << ShutdownHook.new(name, block)
         name
       end
 
-      # All registered shutdown hooks.
+      # All registered shutdown hooks (for the current application).
       def shutdown_hooks
-        @shutdown_hooks ||= []
+        registry[:shutdown_hooks]
       end
 
       # Empties the shutdown hook registry and re-arms run_shutdown!.
       def clear_shutdown_hooks
-        @shutdown_hooks = []
-        @shutdown_ran = false
+        reg = registry
+        reg[:shutdown_hooks] = []
+        reg[:shutdown_ran] = false
       end
 
       # Runs every shutdown hook once, in registration order. A failing hook is
       # logged and does not prevent the remaining cleanup from running.
       def run_shutdown!
-        return if @shutdown_ran
-        @shutdown_ran = true
+        reg = registry
+        return if reg[:shutdown_ran]
+        reg[:shutdown_ran] = true
 
-        shutdown_hooks.each do |hook|
+        reg[:shutdown_hooks].each do |hook|
           hook.block.call
         rescue Exception => e
           Rails.logger&.error("[kubernetes] shutdown hook #{hook.name.inspect} failed: #{e.class}: #{e.message}")
@@ -157,6 +148,18 @@ module Rails
 
         "no graceful-shutdown hooks registered (use Rails::Kubernetes.on_shutdown)"
       end
+
+      private
+        def app_config
+          Rails.application.config
+        end
+
+        # Per-application mutable state, keyed on the current Rails.application
+        # so a different app/root in the same process is fully isolated.
+        def registry
+          (@registries ||= {})[Rails.application] ||=
+            { loaded: false, checks: [], shutdown_hooks: [], shutdown_ran: false }
+        end
     end
   end
 end

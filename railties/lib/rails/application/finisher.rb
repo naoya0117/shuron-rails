@@ -154,9 +154,13 @@ module Rails
       initializer :setup_kubernetes_lifecycle do |app|
         previous_handler = Signal.trap("TERM") do |signo|
           Rails::Kubernetes.run_shutdown!
-          if previous_handler.respond_to?(:call)
+          case previous_handler
+          when "IGNORE", "SIG_IGN"
+            # A previous handler deliberately ignored TERM; preserve that.
+          when Proc, Method
             previous_handler.call(signo)
           else
+            # "DEFAULT"/"SYSTEM_DEFAULT"/nil: terminate after cleanup.
             exit
           end
         end
