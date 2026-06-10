@@ -63,7 +63,10 @@ module Rails
         app = Rails.application
 
         unless @loaded_app.equal?(app)
+          # Reset per-application state so a different app in the same process
+          # starts clean (checks and shutdown hooks are module-level).
           clear_checks
+          clear_shutdown_hooks
           # config/kubernetes.rb is the single definition window; environment
           # differences belong inside it (it is generated using ENV, e.g.
           # Integer(ENV.fetch("KC_READINESS_TIMEOUT_MS", "300"))). Setting

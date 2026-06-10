@@ -152,10 +152,10 @@ module Rails
       # hooks on SIGTERM (chaining any handler already installed, e.g. the app
       # server's), and register the "no shutdown hook" diagnostic.
       initializer :setup_kubernetes_lifecycle do |app|
-        previous_handler = Signal.trap("TERM") do
+        previous_handler = Signal.trap("TERM") do |signo|
           Rails::Kubernetes.run_shutdown!
           if previous_handler.respond_to?(:call)
-            previous_handler.call
+            previous_handler.call(signo)
           else
             exit
           end
