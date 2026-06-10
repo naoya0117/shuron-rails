@@ -115,10 +115,15 @@ class Rails::KubernetesLayerTest < ActiveSupport::TestCase
     assert_nil Rails::Kubernetes.managed_lifecycle_problem
   end
 
-  test "self_awareness_problem warns on kubernetes without Downward API" do
+  test "self_awareness_problem warns on kubernetes until all identity vars are injected" do
     ENV["KC_PLATFORM"] = "kubernetes"
     assert Rails::Kubernetes.self_awareness_problem
+
     ENV["POD_NAME"] = "web-abc"
+    assert Rails::Kubernetes.self_awareness_problem, "partial injection should still warn"
+
+    ENV["POD_NAMESPACE"] = "prod"
+    ENV["NODE_NAME"] = "node-1"
     assert_nil Rails::Kubernetes.self_awareness_problem
   end
 end

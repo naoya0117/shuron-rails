@@ -134,9 +134,11 @@ module Rails
       # Warns on Kubernetes when the Downward API identity was not injected.
       def self_awareness_problem
         return unless platform == :kubernetes
-        return if ENV["POD_NAME"] || ENV["POD_NAMESPACE"] || ENV["NODE_NAME"]
 
-        "Downward API identity not injected (POD_NAME/POD_NAMESPACE/NODE_NAME); check the manifest"
+        missing = %w[POD_NAME POD_NAMESPACE NODE_NAME].reject { |var| ENV[var].present? }
+        return if missing.empty?
+
+        "Downward API identity not fully injected (missing #{missing.join('/')}); check the manifest"
       end
 
       private

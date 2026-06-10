@@ -51,24 +51,36 @@ module Rails
 
     class << self
       def liveness_path
-        liveness_config[:path].presence || "/kubernetes/health/live"
+        fetch_config(liveness_config, :path).presence || "/kubernetes/health/live"
       end
 
       def readiness_path
-        readiness_config[:path].presence || "/kubernetes/health/ready"
+        fetch_config(readiness_config, :path).presence || "/kubernetes/health/ready"
       end
 
       def liveness_config
-        kubernetes_config[:liveness] || {}
+        fetch_config(kubernetes_config, :liveness) || {}
       end
 
       def readiness_config
-        kubernetes_config[:readiness] || {}
+        fetch_config(kubernetes_config, :readiness) || {}
+      end
+
+      # Reads a Symbol +key+ from the Kubernetes-layer config, tolerating
+      # string-keyed Hashes (as the kubernetes:convert task does) without the
+      # +false || nil+ pitfall that would drop a +false+ value.
+      def fetch_config(config, key)
+        return unless config.respond_to?(:key?)
+
+        if config.key?(key)
+          config[key]
+        elsif config.key?(key.to_s)
+          config[key.to_s]
+        end
       end
 
       private
-        # Kubernetes-layer settings as a plain Symbol-keyed Hash, loaded once by
-        # Rails::Kubernetes::ConfigLoader (from config/kubernetes.rb).
+        # Kubernetes-layer settings, loaded once by Rails::Kubernetes::ConfigLoader.
         def kubernetes_config
           Rails::Kubernetes::ConfigLoader.load!
           Rails.application.config.x.kubernetes || {}
@@ -138,7 +150,7 @@ module Rails
       end
 
       def database_check_enabled?
-        check_database = readiness_config[:check_database]
+        check_database = self.class.fetch_config(readiness_config, :check_database)
         return true if check_database.nil?
         return check_database != "false" if check_database.is_a?(String)
 
@@ -146,7 +158,7 @@ module Rails
       end
 
       def readiness_timeout_ms
-        timeout_ms = readiness_config[:timeout_ms]
+        timeout_ms = self.class.fetch_config(readiness_config, :timeout_ms)
         timeout_ms.present? ? timeout_ms.to_i : 300
       end
 
