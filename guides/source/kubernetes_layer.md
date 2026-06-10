@@ -116,8 +116,11 @@ Rails::Kubernetes.init_step(:migrate) do
 end
 ```
 
-Run them with `bin/rails kubernetes:init`. Locally the steps run as a Docker
-entrypoint step; on Kubernetes the same command runs as an `initContainer`.
+`bin/rails kubernetes:init` runs the registered steps. The task is the single
+place that defines them; wire it into your runtime on each platform -- as a step
+in your Docker entrypoint locally/Compose, and as an `initContainer` command on
+Kubernetes -- so the same steps run before the app starts everywhere. (It is not
+invoked automatically by `kubernetes:convert` or the generated entrypoint.)
 
 Self Awareness
 --------------

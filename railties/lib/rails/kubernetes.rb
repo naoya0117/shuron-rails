@@ -135,7 +135,7 @@ module Rails
       def self_awareness_problem
         return unless platform == :kubernetes
 
-        missing = %w[POD_NAME POD_NAMESPACE NODE_NAME].reject { |var| ENV[var].present? }
+        missing = %w[POD_NAME POD_NAMESPACE NODE_NAME].select { |var| ENV[var].to_s.empty? }
         return if missing.empty?
 
         "Downward API identity not fully injected (missing #{missing.join('/')}); check the manifest"
