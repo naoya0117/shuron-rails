@@ -148,6 +148,24 @@ module Rails
         Rails::Kubernetes.load_definition!
       end
 
+      # Managed Lifecycle: run the application's registered graceful-shutdown
+      # hooks on SIGTERM (chaining any handler already installed, e.g. the app
+      # server's), and register the "no shutdown hook" diagnostic.
+      initializer :setup_kubernetes_lifecycle do |app|
+        previous_handler = Signal.trap("TERM") do
+          Rails::Kubernetes.run_shutdown!
+          if previous_handler.respond_to?(:call)
+            previous_handler.call
+          else
+            exit
+          end
+        end
+
+        Rails::Kubernetes.register_check(:managed_lifecycle, severity: :warn) do
+          Rails::Kubernetes.managed_lifecycle_problem
+        end
+      end
+
       initializer :add_internal_routes do |app|
         if Rails.env.development?
           app.routes.prepend do

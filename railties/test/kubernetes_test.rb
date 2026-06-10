@@ -79,6 +79,63 @@ class Rails::KubernetesCheckRegistryTest < ActiveSupport::TestCase
   end
 end
 
+class Rails::KubernetesLifecycleTest < ActiveSupport::TestCase
+  setup { Rails::Kubernetes.clear_shutdown_hooks }
+  teardown { Rails::Kubernetes.clear_shutdown_hooks }
+
+  test "on_shutdown registers a named hook" do
+    Rails::Kubernetes.on_shutdown(:cleanup) { }
+    assert_equal [:cleanup], Rails::Kubernetes.shutdown_hooks.map(&:name)
+  end
+
+  test "run_shutdown! runs hooks in registration order" do
+    order = []
+    Rails::Kubernetes.on_shutdown(:a) { order << :a }
+    Rails::Kubernetes.on_shutdown(:b) { order << :b }
+
+    Rails::Kubernetes.run_shutdown!
+
+    assert_equal [:a, :b], order
+  end
+
+  test "run_shutdown! runs hooks at most once" do
+    count = 0
+    Rails::Kubernetes.on_shutdown(:c) { count += 1 }
+
+    Rails::Kubernetes.run_shutdown!
+    Rails::Kubernetes.run_shutdown!
+
+    assert_equal 1, count
+  end
+
+  test "a later shutdown hook still runs when an earlier one raises" do
+    ran = []
+    Rails::Kubernetes.on_shutdown(:boom) { ran << :boom; raise "fail" }
+    Rails::Kubernetes.on_shutdown(:after) { ran << :after }
+
+    Rails::Kubernetes.run_shutdown!
+
+    assert_equal [:boom, :after], ran
+  end
+
+  test "managed_lifecycle_problem warns on kubernetes without shutdown hooks" do
+    ENV["KC_PLATFORM"] = "kubernetes"
+    assert Rails::Kubernetes.managed_lifecycle_problem
+
+    Rails::Kubernetes.on_shutdown(:cleanup) { }
+    assert_nil Rails::Kubernetes.managed_lifecycle_problem
+  ensure
+    ENV.delete("KC_PLATFORM")
+  end
+
+  test "managed_lifecycle_problem is silent off kubernetes" do
+    ENV["KC_PLATFORM"] = "local"
+    assert_nil Rails::Kubernetes.managed_lifecycle_problem
+  ensure
+    ENV.delete("KC_PLATFORM")
+  end
+end
+
 class Rails::KubernetesDefinitionTest < ActiveSupport::TestCase
   test "definition returns an already-populated config without reloading" do
     original = Rails.application.config.x.kubernetes

@@ -16,6 +16,10 @@ module Rails
     # needs is missing/unconfigured, or +nil+ when everything is in order.
     Check = Struct.new(:name, :severity, :block)
 
+    # A graceful-shutdown hook (Managed Lifecycle). +block+ is the cleanup the
+    # application runs when the process is asked to terminate (SIGTERM).
+    ShutdownHook = Struct.new(:name, :block)
+
     class << self
       # Detects the runtime platform, used by the layer to absorb
       # platform-specific differences:
@@ -106,6 +110,49 @@ module Rails
 
           { name: check.name, severity: check.severity, message: message }
         end
+      end
+
+      # Registers a graceful-shutdown hook (Managed Lifecycle). The +block+ is
+      # the application's cleanup, run (once, in registration order) when the
+      # process receives SIGTERM. See the :install_kubernetes_signal_handlers
+      # initializer.
+      def on_shutdown(name, &block)
+        shutdown_hooks << ShutdownHook.new(name, block)
+        name
+      end
+
+      # All registered shutdown hooks.
+      def shutdown_hooks
+        @shutdown_hooks ||= []
+      end
+
+      # Empties the shutdown hook registry and re-arms run_shutdown!.
+      def clear_shutdown_hooks
+        @shutdown_hooks = []
+        @shutdown_ran = false
+      end
+
+      # Runs every shutdown hook once, in registration order. A failing hook is
+      # logged and does not prevent the remaining cleanup from running.
+      def run_shutdown!
+        return if @shutdown_ran
+        @shutdown_ran = true
+
+        shutdown_hooks.each do |hook|
+          hook.block.call
+        rescue Exception => e
+          Rails.logger&.error("[kubernetes] shutdown hook #{hook.name.inspect} failed: #{e.class}: #{e.message}")
+        end
+      end
+
+      # Diagnostic (Managed Lifecycle): on Kubernetes a container should clean
+      # up on SIGTERM, so the absence of any shutdown hook is worth a warning.
+      # Returns a problem message or +nil+.
+      def managed_lifecycle_problem
+        return unless platform == :kubernetes
+        return unless shutdown_hooks.empty?
+
+        "no graceful-shutdown hooks registered (use Rails::Kubernetes.on_shutdown)"
       end
     end
   end
