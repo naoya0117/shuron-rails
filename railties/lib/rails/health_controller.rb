@@ -139,7 +139,10 @@ module Rails
 
       def database_check_enabled?
         check_database = readiness_config[:check_database]
-        check_database.nil? ? true : check_database
+        return true if check_database.nil?
+        return check_database != "false" if check_database.is_a?(String)
+
+        check_database
       end
 
       def readiness_timeout_ms
