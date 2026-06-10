@@ -52,6 +52,18 @@ module ApplicationTests
         Rails.application.config.x.kubernetes[:readiness][:check_database]
     end
 
+    test "diagnostics report layer warnings after boot on kubernetes" do
+      ENV["KC_PLATFORM"] = "kubernetes"
+
+      app "development"
+
+      names = Rails::Kubernetes.diagnostics.map { |d| d[:name] }
+      assert_includes names, :managed_lifecycle
+      assert_includes names, :self_awareness
+    ensure
+      ENV.delete("KC_PLATFORM")
+    end
+
     test "init_step registered in an initializer runs via run_init!" do
       app_file "config/initializers/register_init.rb", <<-RUBY
         Rails.application.config.x.init_marker = []

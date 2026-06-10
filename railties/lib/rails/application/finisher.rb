@@ -169,6 +169,16 @@ module Rails
         end
       end
 
+      # Diagnostics: on Kubernetes, surface (via the logger) any layer feature
+      # that is not configured for the platform. Runs after the checks are
+      # registered. Locally it stays quiet; use `bin/rails kubernetes:doctor`
+      # to preflight what would warn on Kubernetes.
+      initializer :emit_kubernetes_diagnostics, after: :setup_kubernetes_lifecycle do |app|
+        app.config.after_initialize do
+          Rails::Kubernetes.emit_diagnostics if Rails::Kubernetes.platform == :kubernetes
+        end
+      end
+
       initializer :add_internal_routes do |app|
         if Rails.env.development?
           app.routes.prepend do

@@ -116,6 +116,29 @@ module Rails
         end
       end
 
+      # Diagnostics: runs every registered check and returns the problems
+      # (<tt>{ name:, severity:, message: }</tt>), minus any check named in
+      # <tt>config.x.kubernetes[:diagnostics][:ignore]</tt>. Returns [] when
+      # diagnostics are disabled (<tt>[:diagnostics][:enabled] == false</tt>).
+      def diagnostics
+        config = definition[:diagnostics] || {}
+        return [] if config[:enabled] == false
+
+        ignored = Array(config[:ignore]).map(&:to_sym)
+        run_checks.reject { |d| ignored.include?(d[:name]) }
+      end
+
+      # Logs each pending diagnostic to +logger+ at its severity (+:warn+ /
+      # +:info+). Used at boot and by <tt>bin/rails kubernetes:doctor</tt>.
+      def emit_diagnostics(logger = Rails.logger)
+        return unless logger
+
+        diagnostics.each do |d|
+          line = "[kubernetes] #{d[:name]}: #{d[:message]}"
+          d[:severity] == :info ? logger.info(line) : logger.warn(line)
+        end
+      end
+
       # Registers a graceful-shutdown hook (Managed Lifecycle). The +block+ is
       # the application's cleanup, run (once, in registration order) when the
       # process receives SIGTERM. See the :setup_kubernetes_lifecycle initializer.

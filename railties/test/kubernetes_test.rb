@@ -216,6 +216,59 @@ class Rails::KubernetesSelfAwarenessTest < ActiveSupport::TestCase
   end
 end
 
+class Rails::KubernetesDiagnosticsTest < ActiveSupport::TestCase
+  class FakeLogger
+    attr_reader :warns, :infos
+    def initialize; @warns = []; @infos = []; end
+    def warn(msg = nil); @warns << (msg || yield); end
+    def info(msg = nil); @infos << (msg || yield); end
+  end
+
+  setup do
+    Rails::Kubernetes.clear_checks
+    @orig = Rails.application.config.x.kubernetes
+    Rails.application.config.x.kubernetes = { diagnostics: {} }
+  end
+
+  teardown do
+    Rails::Kubernetes.clear_checks
+    Rails.application.config.x.kubernetes = @orig
+  end
+
+  test "diagnostics returns problems from registered checks" do
+    Rails::Kubernetes.register_check(:a, severity: :warn) { "problem a" }
+    Rails::Kubernetes.register_check(:b) { nil }
+
+    assert_equal [:a], Rails::Kubernetes.diagnostics.map { |d| d[:name] }
+  end
+
+  test "diagnostics omits ignored checks" do
+    Rails::Kubernetes.register_check(:a) { "x" }
+    Rails::Kubernetes.register_check(:b) { "y" }
+    Rails.application.config.x.kubernetes = { diagnostics: { ignore: [:a] } }
+
+    assert_equal [:b], Rails::Kubernetes.diagnostics.map { |d| d[:name] }
+  end
+
+  test "diagnostics is empty when disabled" do
+    Rails::Kubernetes.register_check(:a) { "x" }
+    Rails.application.config.x.kubernetes = { diagnostics: { enabled: false } }
+
+    assert_empty Rails::Kubernetes.diagnostics
+  end
+
+  test "emit_diagnostics logs each problem at its severity" do
+    Rails::Kubernetes.register_check(:a, severity: :warn) { "warn problem" }
+    Rails::Kubernetes.register_check(:b, severity: :info) { "info problem" }
+    logger = FakeLogger.new
+
+    Rails::Kubernetes.emit_diagnostics(logger)
+
+    assert(logger.warns.any? { |m| m.include?("warn problem") }, "expected a warn log")
+    assert(logger.infos.any? { |m| m.include?("info problem") }, "expected an info log")
+  end
+end
+
 class Rails::KubernetesDefinitionTest < ActiveSupport::TestCase
   test "definition returns an already-populated config without reloading" do
     original = Rails.application.config.x.kubernetes
