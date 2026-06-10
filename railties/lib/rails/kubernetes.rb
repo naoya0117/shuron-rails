@@ -36,13 +36,14 @@ module Rails
         end
       end
 
-      # Returns the Kubernetes-layer settings (+config.x.kubernetes+),
-      # loading +config/kubernetes.rb+ on first access if it has not been
-      # populated yet. Once populated (at boot or by an earlier lookup) the
-      # existing Hash is returned untouched, so it is safe to call repeatedly
-      # and from boot-time consumers running before the boot initializer.
+      # Returns the Kubernetes-layer settings (+config.x.kubernetes+), loading
+      # +config/kubernetes.rb+ on first access for the current application if it
+      # has not been loaded yet. The load guard (not the value) is checked,
+      # because +config.x+ auto-vivifies missing keys to a truthy empty
+      # OrderedOptions, which would otherwise mask "not loaded yet".
       def definition
-        Rails.application.config.x.kubernetes || load_definition!
+        load_definition! unless @loaded_app.equal?(Rails.application)
+        Rails.application.config.x.kubernetes || {}
       end
 
       # Loads +config/kubernetes.rb+ (when present) into +config.x.kubernetes+
