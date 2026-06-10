@@ -161,14 +161,20 @@ module Rails
         # (rake tasks, custom runners): handle SIGTERM directly, chaining any
         # handler already installed. run_shutdown! is idempotent.
         previous_handler = Signal.trap("TERM") do |signo|
-          Rails::Kubernetes.run_shutdown!
-          if previous_handler.respond_to?(:call)
-            previous_handler.call(signo)
-          elsif previous_handler == "IGNORE" || previous_handler == "SIG_IGN"
-            # A previous handler deliberately ignored TERM; preserve that.
+          if previous_handler == "IGNORE" || previous_handler == "SIG_IGN"
+            # TERM was deliberately ignored: keep running and do not run cleanup,
+            # so the live process is not left partially shut down.
           else
-            # "DEFAULT"/"SYSTEM_DEFAULT"/nil: terminate after cleanup.
-            exit
+            Rails::Kubernetes.run_shutdown!
+            if previous_handler.respond_to?(:call)
+              previous_handler.call(signo)
+            else
+              # "DEFAULT"/"SYSTEM_DEFAULT"/nil: terminate *as if* by the signal
+              # so supervisors/Kubernetes Jobs still see a signal exit status,
+              # not a success.
+              Signal.trap("TERM", "DEFAULT")
+              Process.kill("TERM", Process.pid)
+            end
           end
         end
 
