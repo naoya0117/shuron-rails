@@ -51,45 +51,27 @@ module Rails
 
     class << self
       def liveness_path
-        read_config_value(liveness_config, :path).presence || "/kubernetes/health/live"
+        liveness_config[:path].presence || "/kubernetes/health/live"
       end
 
       def readiness_path
-        read_config_value(readiness_config, :path).presence || "/kubernetes/health/ready"
+        readiness_config[:path].presence || "/kubernetes/health/ready"
       end
 
       def liveness_config
-        extract_nested_config(kubernetes_definition_config, :liveness)
+        kubernetes_config[:liveness] || {}
       end
 
       def readiness_config
-        extract_nested_config(kubernetes_definition_config, :readiness)
+        kubernetes_config[:readiness] || {}
       end
 
       private
-        def kubernetes_definition_config
+        # Kubernetes-layer settings as a plain Symbol-keyed Hash, loaded once by
+        # Rails::Kubernetes::ConfigLoader (from config/kubernetes.rb).
+        def kubernetes_config
           Rails::Kubernetes::ConfigLoader.load!
           Rails.application.config.x.kubernetes || {}
-        end
-
-        def extract_nested_config(config, key)
-          return {} unless config
-
-          nested = if config.respond_to?(:[])
-            config[key] || config[key.to_s]
-          end
-          nested ||= config.public_send(key) if config.respond_to?(key)
-          nested || {}
-        end
-
-        def read_config_value(config, key)
-          return nil unless config
-
-          value = if config.respond_to?(:[])
-            config[key] || config[key.to_s]
-          end
-          value ||= config.public_send(key) if config.respond_to?(key)
-          value
         end
     end
 
@@ -156,24 +138,17 @@ module Rails
       end
 
       def database_check_enabled?
-        check_database = readiness_setting(:check_database)
-        return true if check_database.nil?
-        return check_database == "true" if check_database.is_a?(String)
-
-        check_database
+        check_database = readiness_config[:check_database]
+        check_database.nil? ? true : check_database
       end
 
       def readiness_timeout_ms
-        timeout_ms = readiness_setting(:timeout_ms)
+        timeout_ms = readiness_config[:timeout_ms]
         timeout_ms.present? ? timeout_ms.to_i : 300
       end
 
       def readiness_config
         self.class.readiness_config
-      end
-
-      def readiness_setting(key)
-        self.class.send(:read_config_value, readiness_config, key)
       end
 
       def html_status(color:)

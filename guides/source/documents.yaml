@@ -243,6 +243,10 @@
       name: Error Reporting in Rails Applications
       url: error_reporting.html
       description: This guide introduces ways to manage errors that occur in Ruby on Rails applications.
+    -
+      name: The Kubernetes Layer
+      url: kubernetes_layer.html
+      description: This guide covers the Kubernetes layer, which aggregates the application-side support (health probes, lifecycle, init steps, self awareness, diagnostics) needed to move from Docker development to a Kubernetes cluster.
 
 -
   name: Advanced Active Record

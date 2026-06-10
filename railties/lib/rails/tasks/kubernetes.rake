@@ -5,6 +5,26 @@ require "rails/kubernetes/config_loader"
 require "rails/kubernetes/manifest_annotator"
 
 namespace :kubernetes do
+  desc "Run registered Kubernetes-layer initialization steps (Init Container)"
+  task init: :environment do
+    require "rails/kubernetes"
+    Rails::Kubernetes.run_init!
+  end
+
+  desc "Report Kubernetes-layer diagnostics (use KC_PLATFORM=kubernetes to preflight)"
+  task doctor: :environment do
+    require "rails/kubernetes"
+    diagnostics = Rails::Kubernetes.diagnostics
+
+    if diagnostics.empty?
+      puts "[kubernetes] no diagnostics."
+    else
+      diagnostics.each do |d|
+        puts "[#{d[:severity]}] #{d[:name]}: #{d[:message]}"
+      end
+    end
+  end
+
   desc "Convert docker-compose.yml to Kubernetes manifests using Kompose"
   task convert: :environment do
     unless system("which kompose > /dev/null 2>&1")

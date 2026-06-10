@@ -641,8 +641,7 @@ module Rails
     end
 
     initializer :load_kubernetes_definition, before: :load_config_initializers do
-      require "rails/kubernetes/config_loader"
-      require "rails/kubernetes/graceful_shutdown"
+      require "rails/kubernetes"
       Rails::Kubernetes::ConfigLoader.load!
     end
 
@@ -652,8 +651,19 @@ module Rails
       end
     end
 
-    initializer :kubernetes_graceful_shutdown, after: :load_config_initializers do
+    initializer :kubernetes_graceful_shutdown, after: :load_config_initializers do |app|
       Rails::Kubernetes::GracefulShutdown.install!
+
+      Rails::Kubernetes.register_check(:managed_lifecycle, severity: :warn) do
+        Rails::Kubernetes.managed_lifecycle_problem
+      end
+      Rails::Kubernetes.register_check(:self_awareness, severity: :warn) do
+        Rails::Kubernetes.self_awareness_problem
+      end
+
+      app.config.after_initialize do
+        Rails::Kubernetes.emit_diagnostics if Rails::Kubernetes.platform == :kubernetes
+      end
     end
 
     initializer :wrap_reloader_around_load_seed do |app|
