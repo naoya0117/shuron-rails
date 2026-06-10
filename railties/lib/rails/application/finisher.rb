@@ -14,6 +14,23 @@ module Rails
         ensure_generator_templates_added
       end
 
+      # Registers the built-in Kubernetes-layer diagnostics for the application
+      # (not for every engine) and, on Kubernetes, emits them once after boot.
+      initializer :setup_kubernetes_diagnostics do |app|
+        require "rails/kubernetes"
+
+        Rails::Kubernetes.register_check(:managed_lifecycle, severity: :warn) do
+          Rails::Kubernetes.managed_lifecycle_problem
+        end
+        Rails::Kubernetes.register_check(:self_awareness, severity: :warn) do
+          Rails::Kubernetes.self_awareness_problem
+        end
+
+        app.config.after_initialize do
+          Rails::Kubernetes.emit_diagnostics if Rails::Kubernetes.platform == :kubernetes
+        end
+      end
+
       initializer :setup_main_autoloader do
         autoloader = Rails.autoloaders.main
 

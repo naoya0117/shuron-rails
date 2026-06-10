@@ -2,21 +2,26 @@
 
 module Rails
   module Kubernetes
+    # Managed Lifecycle (terminal): runs application cleanup when the process
+    # terminates. Hooks run once, in registration order.
     module GracefulShutdown
       class << self
         def on_shutdown(&block)
+          raise ArgumentError, "on_shutdown requires a block" unless block
+
           hooks << block
         end
 
-        # Replaces the SIGTERM trap to run registered hooks first,
-        # then delegates to whatever handler was installed previously
-        # (typically Puma's, which performs graceful drain).
+        # Runs the registered hooks on normal process exit. This covers SIGTERM
+        # (whose default disposition runs at_exit) and the app server draining
+        # and exiting. Running from at_exit -- rather than a signal trap --
+        # avoids "can't be called from trap context" errors and never clobbers
+        # the server's own TERM handling (which is installed after boot).
         def install!
-          previous = Signal.trap("TERM") {}
-          Signal.trap("TERM") do
-            run_hooks
-            previous.call if previous.is_a?(Proc)
-          end
+          return if @installed
+
+          @installed = true
+          at_exit { run_hooks }
         end
 
         def hooks
@@ -24,18 +29,21 @@ module Rails
         end
 
         def run_hooks
+          return if @ran
+
+          @ran = true
           hooks.each do |hook|
-            begin
-              hook.call
-            rescue => e
-              warn "[GracefulShutdown] #{e.class}: #{e.message}"
-            end
+            hook.call
+          rescue StandardError => e
+            warn "[GracefulShutdown] #{e.class}: #{e.message}"
           end
         end
 
-        # Test helper. Clears all registered hooks.
+        # Test helper. Clears registered hooks and re-arms install!/run_hooks.
         def reset!
           @hooks = []
+          @ran = false
+          @installed = false
         end
       end
     end
