@@ -60,9 +60,11 @@ module Rails
 
         unless @loaded_app.equal?(app)
           clear_checks
-          # Only load the file when the app has not already configured
-          # config.x.kubernetes inline (e.g. in config/environments/*.rb), so
-          # explicit overrides are not clobbered. +present?+ rather than truthy,
+          # config/kubernetes.rb is the single definition window; environment
+          # differences belong inside it (it is generated using ENV, e.g.
+          # Integer(ENV.fetch("KC_READINESS_TIMEOUT_MS", "300"))). Setting
+          # config.x.kubernetes inline instead therefore takes full control and
+          # suppresses the file (no partial merge). +present?+, not truthiness,
           # because config.x auto-vivifies an empty OrderedOptions.
           unless app.config.x.kubernetes.present?
             file = Rails.root.join("config/kubernetes.rb")
