@@ -136,7 +136,9 @@ module Rails
 
         reg[:shutdown_hooks].each do |hook|
           hook.block.call
-        rescue Exception => e
+        rescue StandardError => e
+          # A failing hook is logged and does not stop the rest; fatal
+          # exceptions (SystemExit, signals) are allowed to propagate.
           Rails.logger&.error("[kubernetes] shutdown hook #{hook.name.inspect} failed: #{e.class}: #{e.message}")
         end
       end
