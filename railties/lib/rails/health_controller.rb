@@ -49,6 +49,11 @@ module Rails
   class HealthController < ActionController::Base
     rescue_from(Exception) { render_down }
 
+    # String values (case-insensitive) that disable a boolean setting, matching
+    # ActiveModel::Type::Boolean so an ENV-sourced "0"/"off"/"false"/"FALSE"
+    # turns the readiness database check off as an operator expects.
+    FALSE_STRINGS = ["0", "f", "false", "off"].freeze
+
     class << self
       def liveness_path
         fetch_config(liveness_config, :path).presence || "/kubernetes/health/live"
@@ -152,7 +157,7 @@ module Rails
       def database_check_enabled?
         check_database = self.class.fetch_config(readiness_config, :check_database)
         return true if check_database.nil?
-        return check_database != "false" if check_database.is_a?(String)
+        return !FALSE_STRINGS.include?(check_database.strip.downcase) if check_database.is_a?(String)
 
         check_database
       end

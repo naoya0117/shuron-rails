@@ -141,6 +141,21 @@ class HealthControllerTest < ActionController::TestCase
     Rails.application.config.x.kubernetes = original_config
   end
 
+  test "health controller readiness honors ENV-style string false for check_database" do
+    original_config = Rails.application.config.x.kubernetes
+
+    %w[false FALSE 0 off].each do |falsey|
+      Rails.application.config.x.kubernetes = { readiness: { check_database: falsey } }
+
+      get :ready, format: :json
+
+      assert_response :success, "expected #{falsey.inspect} to disable the DB check"
+      assert_equal "skipped", JSON.parse(@response.body).dig("checks", "database")
+    end
+  ensure
+    Rails.application.config.x.kubernetes = original_config
+  end
+
   test "health controller readiness path can be configured via container definition" do
     original_config = Rails.application.config.x.kubernetes
     original_loaded_flag = Rails.application.config.x.kubernetes_definition_loaded
