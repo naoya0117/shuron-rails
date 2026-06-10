@@ -1,6 +1,11 @@
 # frozen_string_literal: true
 
 namespace :kubernetes do
+  desc "Run registered Kubernetes-layer initialization steps (Init Container)"
+  task init: :environment do
+    Rails::Kubernetes.run_init!
+  end
+
   desc "Convert docker-compose.yml to Kubernetes manifests using Kompose"
   task convert: :environment do
     unless system("which kompose > /dev/null 2>&1")

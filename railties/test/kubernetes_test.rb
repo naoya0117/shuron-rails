@@ -138,6 +138,45 @@ class Rails::KubernetesLifecycleTest < ActiveSupport::TestCase
   end
 end
 
+class Rails::KubernetesInitTest < ActiveSupport::TestCase
+  setup { Rails::Kubernetes.clear_init_steps }
+  teardown { Rails::Kubernetes.clear_init_steps }
+
+  test "init_step registers a named step" do
+    Rails::Kubernetes.init_step(:migrate) { }
+    assert_equal [:migrate], Rails::Kubernetes.init_steps.map(&:name)
+  end
+
+  test "run_init! runs steps in registration order" do
+    order = []
+    Rails::Kubernetes.init_step(:a) { order << :a }
+    Rails::Kubernetes.init_step(:b) { order << :b }
+
+    Rails::Kubernetes.run_init!
+
+    assert_equal [:a, :b], order
+  end
+
+  test "run_init! runs steps at most once" do
+    count = 0
+    Rails::Kubernetes.init_step(:c) { count += 1 }
+
+    Rails::Kubernetes.run_init!
+    Rails::Kubernetes.run_init!
+
+    assert_equal 1, count
+  end
+
+  test "run_init! re-raises a failing step (initialization must not continue)" do
+    ran = []
+    Rails::Kubernetes.init_step(:boom) { ran << :boom; raise "fail" }
+    Rails::Kubernetes.init_step(:after) { ran << :after }
+
+    assert_raises(RuntimeError) { Rails::Kubernetes.run_init! }
+    assert_equal [:boom], ran
+  end
+end
+
 class Rails::KubernetesSelfAwarenessTest < ActiveSupport::TestCase
   SELF_ENV = %w[POD_NAME POD_NAMESPACE NODE_NAME POD_IP POD_SERVICE_ACCOUNT KC_PLATFORM].freeze
 

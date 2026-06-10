@@ -52,6 +52,18 @@ module ApplicationTests
         Rails.application.config.x.kubernetes[:readiness][:check_database]
     end
 
+    test "init_step registered in an initializer runs via run_init!" do
+      app_file "config/initializers/register_init.rb", <<-RUBY
+        Rails.application.config.x.init_marker = []
+        Rails::Kubernetes.init_step(:mark) { Rails.application.config.x.init_marker << :ran }
+      RUBY
+
+      app "development"
+      Rails::Kubernetes.run_init!
+
+      assert_equal [:ran], Rails.application.config.x.init_marker
+    end
+
     test "on_shutdown hooks registered in an initializer survive boot" do
       app_file "config/initializers/register_shutdown.rb", <<-RUBY
         Rails::Kubernetes.on_shutdown(:from_initializer) { }

@@ -20,6 +20,11 @@ module Rails
     # application runs when the process is asked to terminate (SIGTERM).
     ShutdownHook = Struct.new(:name, :block)
 
+    # An initialization step (Init Container). +block+ runs once before the
+    # application serves traffic: as a Docker entrypoint step locally, or an
+    # initContainer on Kubernetes.
+    InitStep = Struct.new(:name, :block)
+
     # Self Awareness: the pod's own metadata, injected by the Kubernetes
     # Downward API as environment variables. All fields are +nil+ when not
     # injected (e.g. local/Docker), which is how the layer absorbs the
@@ -159,6 +164,38 @@ module Rails
         "no graceful-shutdown hooks registered (use Rails::Kubernetes.on_shutdown)"
       end
 
+      # Registers an initialization step (Init Container). The +block+ runs
+      # once, before the application serves traffic, via the
+      # <tt>kubernetes:init</tt> task (a Docker entrypoint step locally, or an
+      # initContainer on Kubernetes). Steps should be idempotent.
+      def init_step(name, &block)
+        init_steps << InitStep.new(name, block)
+        name
+      end
+
+      # All registered initialization steps (for the current application).
+      def init_steps
+        registry[:init_steps]
+      end
+
+      # Empties the init step registry and re-arms run_init!.
+      def clear_init_steps
+        reg = registry
+        reg[:init_steps] = []
+        reg[:init_ran] = false
+      end
+
+      # Runs each initialization step once, in registration order. Unlike
+      # shutdown, a failing step aborts initialization (fail fast) by letting
+      # the exception propagate, so the app does not start half-initialized.
+      def run_init!(app = Rails.application)
+        reg = registry(app)
+        return if reg[:init_ran]
+        reg[:init_ran] = true
+
+        reg[:init_steps].each { |step| step.block.call }
+      end
+
       # Self Awareness: the pod's own metadata from the Downward API
       # environment variables (POD_NAME, POD_NAMESPACE, NODE_NAME, POD_IP,
       # POD_SERVICE_ACCOUNT). Values are +nil+ when not injected (local/Docker).
@@ -191,7 +228,8 @@ module Rails
         # different app/root in the same process is fully isolated.
         def registry(app = Rails.application)
           (@registries ||= {})[app] ||=
-            { loaded: false, checks: [], shutdown_hooks: [], shutdown_ran: false }
+            { loaded: false, checks: [], shutdown_hooks: [], shutdown_ran: false,
+              init_steps: [], init_ran: false }
         end
     end
   end
