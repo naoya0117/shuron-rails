@@ -191,9 +191,11 @@ module Rails
       def run_init!(app = Rails.application)
         reg = registry(app)
         return if reg[:init_ran]
-        reg[:init_ran] = true
 
+        # Mark complete only after every step succeeds: if a step raises, the
+        # flag stays false so a retrying caller re-runs the (idempotent) steps.
         reg[:init_steps].each { |step| step.block.call }
+        reg[:init_ran] = true
       end
 
       # Self Awareness: the pod's own metadata from the Downward API
