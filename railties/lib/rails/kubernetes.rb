@@ -60,8 +60,14 @@ module Rails
 
         unless @loaded_app.equal?(app)
           clear_checks
-          file = Rails.root.join("config/kubernetes.rb")
-          load file.to_s if file.exist?
+          # Only load the file when the app has not already configured
+          # config.x.kubernetes inline (e.g. in config/environments/*.rb), so
+          # explicit overrides are not clobbered. +present?+ rather than truthy,
+          # because config.x auto-vivifies an empty OrderedOptions.
+          unless app.config.x.kubernetes.present?
+            file = Rails.root.join("config/kubernetes.rb")
+            load file.to_s if file.exist?
+          end
           @loaded_app = app
         end
 

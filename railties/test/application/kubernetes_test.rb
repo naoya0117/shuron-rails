@@ -36,6 +36,22 @@ module ApplicationTests
         Rails.application.config.x.kubernetes[:platform]
     end
 
+    test "inline config.x.kubernetes is not clobbered by config/kubernetes.rb" do
+      app_file "config/kubernetes.rb", <<-RUBY
+        Rails.application.configure do
+          config.x.kubernetes = { readiness: { check_database: true } }
+        end
+      RUBY
+      app_file "config/initializers/000_inline_kubernetes.rb", <<-RUBY
+        Rails.application.config.x.kubernetes = { readiness: { check_database: false } }
+      RUBY
+
+      app "development"
+
+      assert_equal false,
+        Rails.application.config.x.kubernetes[:readiness][:check_database]
+    end
+
     test "a custom liveness path in config/kubernetes.rb drives the registered route" do
       app_file "config/kubernetes.rb", <<-RUBY
         Rails.application.configure do
