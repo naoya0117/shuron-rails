@@ -158,21 +158,22 @@ module Rails
         at_exit { Rails::Kubernetes.run_shutdown!(app) }
 
         # Fallback for processes without a server signal handler (rake tasks,
-        # custom runners), chaining any handler already installed.
+        # custom runners), chaining any handler already installed. The trap body
+        # intentionally does no cleanup itself: trap context forbids mutex use
+        # (logging, connection pools), so cleanup always runs from at_exit, in
+        # normal context.
         previous_handler = Signal.trap("TERM") do |signo|
           if previous_handler == "IGNORE" || previous_handler == "SIG_IGN"
             # Deliberately ignored: keep running, do not clean up.
           elsif previous_handler.respond_to?(:call)
-            # Let the existing handler drive shutdown; our cleanup runs from
-            # at_exit when the process actually exits, so it is not run early.
+            # Let the existing handler drive the shutdown/exit.
             previous_handler.call(signo)
           else
-            # "DEFAULT"/"SYSTEM_DEFAULT"/nil: a signal exit skips at_exit, so run
-            # cleanup here, then re-raise TERM so supervisors / Kubernetes Jobs
-            # still see a signal exit status rather than success.
-            Rails::Kubernetes.run_shutdown!(app)
-            Signal.trap("TERM", "DEFAULT")
-            Process.kill("TERM", Process.pid)
+            # "DEFAULT"/"SYSTEM_DEFAULT"/nil: exit with a SIGTERM-style status
+            # (128 + signal). SystemExit runs at_exit (where cleanup happens) in
+            # normal context, while supervisors / Kubernetes Jobs still see a
+            # signal exit status rather than success.
+            exit(128 + (Signal.list["TERM"] || 15))
           end
         end
 
