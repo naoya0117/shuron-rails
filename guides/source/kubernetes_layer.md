@@ -65,7 +65,8 @@ Platform Detection
 * `:kubernetes` when `KUBERNETES_SERVICE_HOST` is present (Kubernetes injects it
   into every pod).
 * otherwise `:local`.
-* an explicit `KC_PLATFORM` environment variable always wins.
+* an explicit `KC_PLATFORM` of `kubernetes`, `compose` or `local` wins over the
+  above; any other value is ignored and auto-detection applies.
 
 Features use this to switch behavior internally, so your application calls a
 single API regardless of where it runs.

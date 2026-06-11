@@ -96,11 +96,14 @@ class Rails::KubernetesLayerTest < ActiveSupport::TestCase
 
   # Self Awareness ---------------------------------------------------------
 
-  test "self_info reads Downward API env, nil off Kubernetes" do
-    assert_nil Rails::Kubernetes.self_info.pod_name
-
+  test "self_info reads Downward API env on Kubernetes, nil off Kubernetes" do
     ENV["POD_NAME"] = "web-abc"
     ENV["POD_NAMESPACE"] = "prod"
+
+    # Off Kubernetes the values are not surfaced.
+    assert_nil Rails::Kubernetes.self_info.pod_name
+
+    ENV["KC_PLATFORM"] = "kubernetes"
     info = Rails::Kubernetes.self_info
     assert_equal "web-abc", info.pod_name
     assert_equal "prod", info.namespace

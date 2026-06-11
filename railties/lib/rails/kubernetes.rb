@@ -111,7 +111,12 @@ module Rails
 
       # --- Self Awareness -------------------------------------------------
 
+      # Off Kubernetes (local/Docker) every field is nil -- the Downward API
+      # only injects these on a cluster -- so the platform difference is
+      # absorbed and unrelated local env is not surfaced.
       def self_info
+        return SelfInfo.new unless platform == :kubernetes
+
         SelfInfo.new(
           pod_name: ENV["POD_NAME"],
           namespace: ENV["POD_NAMESPACE"],
