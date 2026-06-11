@@ -4,6 +4,7 @@ require "rake"
 
 # Load Rails Rakefile extensions
 %w(
+  container
   framework
   kubernetes
   log

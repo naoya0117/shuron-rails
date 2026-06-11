@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 module Rails
-  module Kubernetes
+  module Container
     module ConfigLoader
       module_function
 
-      # Loads config/kubernetes.rb once into Rails.application.config.x.kubernetes.
+      # Loads config/container.rb once into Rails.application.config.x.container.
       # Idempotent: subsequent calls are no-ops.
       #
       # Note: We check `== true` explicitly because config.x.<undefined> returns
@@ -14,7 +14,7 @@ module Rails
         return if @loaded == true
         @loaded = true
 
-        definition_file = Rails.root.join("config/kubernetes.rb")
+        definition_file = Rails.root.join("config/container.rb")
         load definition_file.to_s if definition_file.exist?
       end
     end

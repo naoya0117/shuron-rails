@@ -640,9 +640,9 @@ module Rails
       end
     end
 
-    initializer :load_kubernetes_definition, before: :load_config_initializers do
-      require "rails/kubernetes"
-      Rails::Kubernetes::ConfigLoader.load!
+    initializer :load_container_definition, before: :load_config_initializers do
+      require "rails/container"
+      Rails::Container::ConfigLoader.load!
     end
 
     initializer :load_config_initializers do
@@ -651,8 +651,8 @@ module Rails
       end
     end
 
-    initializer :kubernetes_graceful_shutdown, after: :load_config_initializers do
-      Rails::Kubernetes::GracefulShutdown.install!
+    initializer :container_graceful_shutdown, after: :load_config_initializers do
+      Rails::Container::GracefulShutdown.install!
     end
 
     initializer :wrap_reloader_around_load_seed do |app|
