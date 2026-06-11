@@ -1,15 +1,15 @@
 **DO NOT READ THIS FILE ON GITHUB, GUIDES ARE PUBLISHED ON <https://guides.rubyonrails.org>.**
 
-The Kubernetes Layer
-====================
+The Container Layer
+===================
 
-This guide explains the Kubernetes layer (`Rails::Kubernetes`), which aggregates
+This guide explains the container layer (`Rails::Container`), which aggregates
 the application-side work needed to move a containerized app from local/Docker
 development to a Kubernetes cluster into one place.
 
 After reading this guide, you will know:
 
-* How the layer is configured through `config/kubernetes.rb`.
+* How the layer is configured through `config/container.rb`.
 * How the platform is detected and how the layer absorbs Docker vs Kubernetes
   differences.
 * How to use Health Probes, Managed Lifecycle, Init Container and Self
@@ -26,21 +26,21 @@ Overview
 When you develop with Docker and then run on Kubernetes, several Kubernetes
 patterns need *application-side* support that is easy to miss during local
 development (health endpoints, graceful shutdown, initialization, reading your
-own pod metadata). The Kubernetes layer collects this support behind one API so
+own pod metadata). The container layer collects this support behind one API so
 it is defined once and behaves correctly on each platform.
 
-All settings live in a single file, `config/kubernetes.rb`, generated for new
+All settings live in a single file, `config/container.rb`, generated for new
 applications:
 
 ```ruby
-# config/kubernetes.rb
+# config/container.rb
 Rails.application.configure do
-  config.x.kubernetes = {
-    liveness:  { path: "/kubernetes/health/live" },
+  config.x.container = {
+    liveness:  { path: "/container/health/live" },
     readiness: {
-      path: "/kubernetes/health/ready",
+      path: "/container/health/ready",
       check_database: true,
-      timeout_ms: Integer(ENV.fetch("KC_READINESS_TIMEOUT_MS", "300"))
+      timeout_ms: Integer(ENV.fetch("CONTAINER_READINESS_TIMEOUT_MS", "300"))
     },
     resources: {
       cpu:    { request: "100m" },
@@ -54,19 +54,19 @@ Rails.application.configure do
 end
 ```
 
-NOTE: `config/kubernetes.rb` is the single configuration window. Use `ENV` for
+NOTE: `config/container.rb` is the single configuration window. Use `ENV` for
 environment differences (as with `timeout_ms`). The keys are plain Symbols.
 
 Platform Detection
 ------------------
 
-`Rails::Kubernetes.platform` returns `:kubernetes`, `:compose` or `:local`:
+`Rails::Container.platform` returns `:kubernetes`, `:compose` or `:local`:
 
 * `:kubernetes` when `KUBERNETES_SERVICE_HOST` is present (Kubernetes injects it
   into every pod).
 * otherwise `:local`.
-* an explicit `KC_PLATFORM` of `kubernetes`, `compose` or `local` wins over the
-  above; any other value is ignored and auto-detection applies.
+* an explicit `CONTAINER_PLATFORM` of `kubernetes`, `compose` or `local` wins
+  over the above; any other value is ignored and auto-detection applies.
 
 Features use this to switch behavior internally, so your application calls a
 single API regardless of where it runs.
@@ -74,14 +74,14 @@ single API regardless of where it runs.
 Health Probes
 -------------
 
-New applications expose a liveness check at `/kubernetes/health/live` and a
-readiness check at `/kubernetes/health/ready`, auto-registered as routes.
+New applications expose a liveness check at `/container/health/live` and a
+readiness check at `/container/health/ready`, auto-registered as routes.
 
 * **Liveness** returns `200` while the process is up.
 * **Readiness** additionally verifies the database connection (configurable) and
   returns `503` until dependencies are ready.
 
-Configure them under `liveness` / `readiness` in `config/kubernetes.rb`
+Configure them under `liveness` / `readiness` in `config/container.rb`
 (`check_database`, default `true`; `timeout_ms`, default `300`).
 
 Managed Lifecycle (Graceful Shutdown)
@@ -92,8 +92,8 @@ lifecycle). Hooks run once, in registration order, on normal process exit --
 which includes SIGTERM, the signal Kubernetes sends on pod termination:
 
 ```ruby
-# config/kubernetes.rb or an initializer
-Rails::Kubernetes::GracefulShutdown.on_shutdown do
+# config/container.rb or an initializer
+Rails::Container::GracefulShutdown.on_shutdown do
   Sidekiq.shutdown if defined?(Sidekiq)
 end
 ```
@@ -112,12 +112,12 @@ start of the lifecycle). They run once, in order, and fail fast, so steps should
 be idempotent:
 
 ```ruby
-Rails::Kubernetes.init_step(:migrate) do
+Rails::Container.init_step(:migrate) do
   ActiveRecord::Tasks::DatabaseTasks.migrate
 end
 ```
 
-`bin/rails kubernetes:init` runs the registered steps. The task is the single
+`bin/rails container:init` runs the registered steps. The task is the single
 place that defines them; wire it into your runtime on each platform -- as a step
 in your Docker entrypoint locally/Compose, and as an `initContainer` command on
 Kubernetes -- so the same steps run before the app starts everywhere. (It is not
@@ -130,7 +130,7 @@ Read the pod's own metadata, injected by the Downward API as environment
 variables, through one accessor:
 
 ```ruby
-info = Rails::Kubernetes.self_info
+info = Rails::Container.self_info
 info.pod_name        # ENV["POD_NAME"]
 info.namespace       # ENV["POD_NAMESPACE"]
 info.node_name       # ENV["NODE_NAME"]
@@ -151,18 +151,19 @@ for the platform -- for example, no shutdown hook registered, or the Downward
 API identity not injected -- surfacing requirements local development hides.
 
 Preview what would warn before deploying with the doctor task; pass
-`KC_PLATFORM=kubernetes` to evaluate on a Kubernetes basis from your machine:
+`CONTAINER_PLATFORM=kubernetes` to evaluate on a Kubernetes basis from your
+machine:
 
 ```bash
-$ KC_PLATFORM=kubernetes bin/rails kubernetes:doctor
-[warn] managed_lifecycle: no graceful-shutdown hooks registered (use Rails::Kubernetes::GracefulShutdown.on_shutdown)
+$ CONTAINER_PLATFORM=kubernetes bin/rails container:doctor
+[warn] managed_lifecycle: no graceful-shutdown hooks registered (use Rails::Container::GracefulShutdown.on_shutdown)
 [warn] self_awareness: Downward API identity not injected (POD_NAME/POD_NAMESPACE/NODE_NAME); check the manifest
 ```
 
-Control diagnostics in `config/kubernetes.rb`:
+Control diagnostics in `config/container.rb`:
 
 ```ruby
-config.x.kubernetes = {
+config.x.container = {
   diagnostics: { enabled: true, ignore: [:self_awareness] }
 }
 ```
@@ -170,7 +171,7 @@ config.x.kubernetes = {
 Register your own check from a feature or initializer:
 
 ```ruby
-Rails::Kubernetes.register_check(:my_check, severity: :warn) do
+Rails::Container.register_check(:my_check, severity: :warn) do
   "something is misconfigured" unless my_condition_met?
 end
 ```
@@ -182,6 +183,6 @@ Generating Manifests
 
 `bin/rails kubernetes:convert` converts your `docker-compose.yml` to Kubernetes
 manifests with [Kompose](https://kompose.io), applying the health, `resources`
-and `graceful_shutdown` settings from `config/kubernetes.rb` (including the
+and `graceful_shutdown` settings from `config/container.rb` (including the
 `preStop` delay and `terminationGracePeriodSeconds`). The manifests are written
 to `k8s/`.

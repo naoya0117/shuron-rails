@@ -5,7 +5,7 @@ module Rails
     module OverrideBuilder
       module_function
 
-      # config/kubernetes.rb の resources: ハッシュを受け取り、
+      # config/container.rb の resources: ハッシュを受け取り、
       # Docker Compose の deploy.resources 構造を返す。
       # CPU limits は Burstable QoS のため生成しない。
       # memory.limit 省略時は request と同値にして Guaranteed QoS を維持する。

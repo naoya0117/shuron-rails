@@ -1,30 +1,10 @@
 # frozen_string_literal: true
 
 require "rails/kubernetes/override_builder"
-require "rails/kubernetes/config_loader"
+require "rails/container/config_loader"
 require "rails/kubernetes/manifest_annotator"
 
 namespace :kubernetes do
-  desc "Run registered Kubernetes-layer initialization steps (Init Container)"
-  task init: :environment do
-    require "rails/kubernetes"
-    Rails::Kubernetes.run_init!
-  end
-
-  desc "Report Kubernetes-layer diagnostics (use KC_PLATFORM=kubernetes to preflight)"
-  task doctor: :environment do
-    require "rails/kubernetes"
-    diagnostics = Rails::Kubernetes.diagnostics
-
-    if diagnostics.empty?
-      puts "[kubernetes] no diagnostics."
-    else
-      diagnostics.each do |d|
-        puts "[#{d[:severity]}] #{d[:name]}: #{d[:message]}"
-      end
-    end
-  end
-
   desc "Convert docker-compose.yml to Kubernetes manifests using Kompose"
   task convert: :environment do
     unless system("which kompose > /dev/null 2>&1")
@@ -53,16 +33,16 @@ namespace :kubernetes do
   end
 
   def generate_kubernetes_override(path)
-    Rails::Kubernetes::ConfigLoader.load!
-    k8s = Rails.application.config.x.kubernetes || {}
+    Rails::Container::ConfigLoader.load!
+    settings = Rails.application.config.x.container || {}
 
-    liveness  = k8s[:liveness]  || k8s["liveness"]  || {}
-    readiness = k8s[:readiness] || k8s["readiness"] || {}
-    resources = k8s[:resources] || k8s["resources"]
-    graceful  = k8s[:graceful_shutdown] || k8s["graceful_shutdown"] || {}
+    liveness  = settings[:liveness]  || settings["liveness"]  || {}
+    readiness = settings[:readiness] || settings["readiness"] || {}
+    resources = settings[:resources] || settings["resources"]
+    graceful  = settings[:graceful_shutdown] || settings["graceful_shutdown"] || {}
 
-    liveness_path  = liveness[:path]  || liveness["path"]  || "/kubernetes/health/live"
-    readiness_path = readiness[:path] || readiness["path"] || "/kubernetes/health/ready"
+    liveness_path  = liveness[:path]  || liveness["path"]  || "/container/health/live"
+    readiness_path = readiness[:path] || readiness["path"] || "/container/health/ready"
     grace_period   = graceful[:grace_period] || graceful["grace_period"]
     port           = ENV.fetch("PORT", 3000).to_i
 
@@ -101,13 +81,13 @@ namespace :kubernetes do
     override = { "services" => { "web" => web_service } }
 
     File.write(path, YAML.dump(override))
-    puts "Generated #{path} from config/kubernetes.rb"
+    puts "Generated #{path} from config/container.rb"
   end
 
   def annotate_manifests(output_dir)
-    Rails::Kubernetes::ConfigLoader.load!
-    k8s = Rails.application.config.x.kubernetes || {}
-    graceful = k8s[:graceful_shutdown] || k8s["graceful_shutdown"] || {}
+    Rails::Container::ConfigLoader.load!
+    settings = Rails.application.config.x.container || {}
+    graceful = settings[:graceful_shutdown] || settings["graceful_shutdown"] || {}
     pre_stop_delay = graceful[:pre_stop_delay] || graceful["pre_stop_delay"] || "15s"
 
     Dir.glob(File.join(output_dir, "*-deployment.yaml")).each do |path|

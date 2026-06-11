@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Rails
-  module Kubernetes
+  module Container
     # Managed Lifecycle (terminal): runs application cleanup when the process
     # terminates. Hooks run once, in registration order.
     module GracefulShutdown

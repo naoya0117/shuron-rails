@@ -1,17 +1,20 @@
 # frozen_string_literal: true
 
-require "rails/kubernetes/config_loader"
-require "rails/kubernetes/graceful_shutdown"
+require "rails/container/config_loader"
+require "rails/container/graceful_shutdown"
 
 module Rails
-  # = \Rails \Kubernetes layer
+  # = \Rails \Container layer
   #
   # Aggregates the application-side support needed to move from local/Docker
   # development to a Kubernetes cluster behind one API: platform detection,
-  # Managed Lifecycle (Rails::Kubernetes::GracefulShutdown), Init Container
+  # Managed Lifecycle (Rails::Container::GracefulShutdown), Init Container
   # (init steps), Self Awareness (pod metadata), and diagnostics that surface
   # anything not yet configured for the platform.
-  module Kubernetes
+  #
+  # The layer is generalized as the "container" layer; the parts that are
+  # specific to generating Kubernetes manifests live under Rails::Kubernetes.
+  module Container
     # Platforms the layer adapts to.
     PLATFORMS = %i[kubernetes compose local].freeze
 
@@ -20,7 +23,7 @@ module Rails
     Check = Struct.new(:name, :severity, :block)
 
     # An initialization step (Init Container). +block+ runs once before the app
-    # serves traffic, via the +kubernetes:init+ task.
+    # serves traffic, via the +container:init+ task.
     InitStep = Struct.new(:name, :block)
 
     # Self Awareness: the pod's own metadata, injected by the Downward API as
@@ -28,20 +31,20 @@ module Rails
     SelfInfo = Struct.new(:pod_name, :namespace, :node_name, :pod_ip, :service_account, keyword_init: true)
 
     class << self
-      # Detects the runtime platform: an explicit +KC_PLATFORM+ wins; otherwise
-      # the presence of +KUBERNETES_SERVICE_HOST+ means +:kubernetes+; otherwise
-      # +:local+.
+      # Detects the runtime platform: an explicit +CONTAINER_PLATFORM+ wins;
+      # otherwise the presence of +KUBERNETES_SERVICE_HOST+ means +:kubernetes+;
+      # otherwise +:local+.
       def platform
-        override = ENV["KC_PLATFORM"].to_s
+        override = ENV["CONTAINER_PLATFORM"].to_s
         return override.to_sym if PLATFORMS.include?(override.to_sym)
 
         ENV["KUBERNETES_SERVICE_HOST"].to_s.empty? ? :local : :kubernetes
       end
 
-      # The loaded Kubernetes-layer settings (a Symbol-keyed Hash).
+      # The loaded container-layer settings (a Symbol-keyed Hash).
       def config
         ConfigLoader.load!
-        Rails.application.config.x.kubernetes || {}
+        Rails.application.config.x.container || {}
       end
 
       # --- Diagnostic check registry -------------------------------------
@@ -76,7 +79,7 @@ module Rails
         return unless logger
 
         diagnostics.each do |d|
-          line = "[kubernetes] #{d[:name]}: #{d[:message]}"
+          line = "[container] #{d[:name]}: #{d[:message]}"
           d[:severity] == :info ? logger.info(line) : logger.warn(line)
         end
       end
@@ -133,7 +136,7 @@ module Rails
         return unless platform == :kubernetes
         return unless GracefulShutdown.hooks.empty?
 
-        "no graceful-shutdown hooks registered (use Rails::Kubernetes::GracefulShutdown.on_shutdown)"
+        "no graceful-shutdown hooks registered (use Rails::Container::GracefulShutdown.on_shutdown)"
       end
 
       # Warns on Kubernetes when the Downward API identity was not injected.

@@ -1,14 +1,14 @@
 Rails.application.configure do
-  # Kubernetes-layer configuration for Kubernetes-focused runtime behavior.
-  # Keep health checks and future Kubernetes-specific settings in this one file.
-  config.x.kubernetes = {
+  # Container-layer configuration for container-focused runtime behavior.
+  # Keep health checks and future container/Kubernetes settings in this one file.
+  config.x.container = {
     liveness: {
-      path: "/kubernetes/health/live"
+      path: "/container/health/live"
     },
     readiness: {
-      path: "/kubernetes/health/ready",
+      path: "/container/health/ready",
       check_database: true,
-      timeout_ms: Integer(ENV.fetch("KC_READINESS_TIMEOUT_MS", "300"))
+      timeout_ms: Integer(ENV.fetch("CONTAINER_READINESS_TIMEOUT_MS", "300"))
     },
     resources: {
       # CPU: request のみ設定。limits は設定しない（throttling 防止・Burstable QoS）
@@ -28,6 +28,6 @@ end
 # Register graceful shutdown hooks (optional). Hooks run when SIGTERM is received,
 # before Puma starts draining requests.
 #
-# Rails::Kubernetes::GracefulShutdown.on_shutdown do
+# Rails::Container::GracefulShutdown.on_shutdown do
 #   Sidekiq.shutdown if defined?(Sidekiq)
 # end

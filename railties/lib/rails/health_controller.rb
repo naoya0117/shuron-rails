@@ -2,7 +2,7 @@
 
 require "action_controller"
 require "timeout"
-require "rails/kubernetes/config_loader"
+require "rails/container/config_loader"
 
 module Rails
   # Built-in Health Check Endpoint
@@ -28,14 +28,14 @@ module Rails
   # The health check will now be accessible via the +/healthz+ path.
   #
   # \Rails also auto-registers +rails/health#live+ as +rails_liveness_check+.
-  # Configure its path in <tt>"config/kubernetes.rb"</tt> with
-  # <tt>config.x.kubernetes.liveness.path</tt> (or
-  # <tt>config.x.kubernetes.endpoints.liveness_path</tt>).
+  # Configure its path in <tt>"config/container.rb"</tt> with
+  # <tt>config.x.container.liveness.path</tt> (or
+  # <tt>config.x.container.endpoints.liveness_path</tt>).
   #
   # \Rails also auto-registers +rails/health#ready+ as +rails_readiness_check+.
-  # Configure its path in <tt>"config/kubernetes.rb"</tt> with
-  # <tt>config.x.kubernetes.readiness.path</tt> (or
-  # <tt>config.x.kubernetes.endpoints.readiness_path</tt>).
+  # Configure its path in <tt>"config/container.rb"</tt> with
+  # <tt>config.x.container.readiness.path</tt> (or
+  # <tt>config.x.container.endpoints.readiness_path</tt>).
   #
   # NOTE: This endpoint does not reflect the status of all of your application's
   # dependencies, such as the database or Redis cluster. Replace
@@ -56,22 +56,22 @@ module Rails
 
     class << self
       def liveness_path
-        fetch_config(liveness_config, :path).presence || "/kubernetes/health/live"
+        fetch_config(liveness_config, :path).presence || "/container/health/live"
       end
 
       def readiness_path
-        fetch_config(readiness_config, :path).presence || "/kubernetes/health/ready"
+        fetch_config(readiness_config, :path).presence || "/container/health/ready"
       end
 
       def liveness_config
-        fetch_config(kubernetes_config, :liveness) || {}
+        fetch_config(container_config, :liveness) || {}
       end
 
       def readiness_config
-        fetch_config(kubernetes_config, :readiness) || {}
+        fetch_config(container_config, :readiness) || {}
       end
 
-      # Reads a Symbol +key+ from the Kubernetes-layer config, tolerating
+      # Reads a Symbol +key+ from the container-layer config, tolerating
       # string-keyed Hashes (as the kubernetes:convert task does) without the
       # +false || nil+ pitfall that would drop a +false+ value.
       def fetch_config(config, key)
@@ -85,10 +85,10 @@ module Rails
       end
 
       private
-        # Kubernetes-layer settings, loaded once by Rails::Kubernetes::ConfigLoader.
-        def kubernetes_config
-          Rails::Kubernetes::ConfigLoader.load!
-          Rails.application.config.x.kubernetes || {}
+        # Container-layer settings, loaded once by Rails::Container::ConfigLoader.
+        def container_config
+          Rails::Container::ConfigLoader.load!
+          Rails.application.config.x.container || {}
         end
     end
 

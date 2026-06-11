@@ -9,8 +9,8 @@ class HealthControllerTest < ActionController::TestCase
   def setup
     Rails.application.routes.draw do
       get "/up" => "rails/health#show", as: :rails_health_check
-      get "/kubernetes/health/live" => "rails/health#live", as: :rails_liveness_check
-      get "/kubernetes/health/ready" => "rails/health#ready", as: :rails_readiness_check
+      get "/container/health/live" => "rails/health#live", as: :rails_liveness_check
+      get "/container/health/ready" => "rails/health#ready", as: :rails_readiness_check
     end
     @routes = Rails.application.routes
   end
@@ -124,8 +124,8 @@ class HealthControllerTest < ActionController::TestCase
   end
 
   test "health controller returns JSON readiness success response when database check is disabled" do
-    original_config = Rails.application.config.x.kubernetes
-    Rails.application.config.x.kubernetes = { readiness: { check_database: false } }
+    original_config = Rails.application.config.x.container
+    Rails.application.config.x.container = { readiness: { check_database: false } }
 
     get :ready, format: :json
 
@@ -138,14 +138,14 @@ class HealthControllerTest < ActionController::TestCase
     assert_includes json_response, "timestamp"
     assert_match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, json_response["timestamp"])
   ensure
-    Rails.application.config.x.kubernetes = original_config
+    Rails.application.config.x.container = original_config
   end
 
   test "health controller readiness honors ENV-style string false for check_database" do
-    original_config = Rails.application.config.x.kubernetes
+    original_config = Rails.application.config.x.container
 
     %w[false FALSE 0 off].each do |falsey|
-      Rails.application.config.x.kubernetes = { readiness: { check_database: falsey } }
+      Rails.application.config.x.container = { readiness: { check_database: falsey } }
 
       get :ready, format: :json
 
@@ -153,25 +153,25 @@ class HealthControllerTest < ActionController::TestCase
       assert_equal "skipped", JSON.parse(@response.body).dig("checks", "database")
     end
   ensure
-    Rails.application.config.x.kubernetes = original_config
+    Rails.application.config.x.container = original_config
   end
 
   test "health controller readiness path can be configured via container definition" do
-    original_config = Rails.application.config.x.kubernetes
-    Rails.application.config.x.kubernetes = { readiness: { path: "/health/readyz" } }
+    original_config = Rails.application.config.x.container
+    Rails.application.config.x.container = { readiness: { path: "/health/readyz" } }
 
     assert_equal "/health/readyz", Rails::HealthController.readiness_path
   ensure
-    Rails.application.config.x.kubernetes = original_config
+    Rails.application.config.x.container = original_config
   end
 
   test "health controller liveness path can be configured via container definition" do
-    original_config = Rails.application.config.x.kubernetes
-    Rails.application.config.x.kubernetes = { liveness: { path: "/health/livez" } }
+    original_config = Rails.application.config.x.container
+    Rails.application.config.x.container = { liveness: { path: "/health/livez" } }
 
     assert_equal "/health/livez", Rails::HealthController.liveness_path
   ensure
-    Rails.application.config.x.kubernetes = original_config
+    Rails.application.config.x.container = original_config
   end
 
 end
