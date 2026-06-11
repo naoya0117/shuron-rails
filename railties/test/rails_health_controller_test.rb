@@ -158,26 +158,20 @@ class HealthControllerTest < ActionController::TestCase
 
   test "health controller readiness path can be configured via container definition" do
     original_config = Rails.application.config.x.kubernetes
-    original_loaded_flag = Rails.application.config.x.kubernetes_definition_loaded
     Rails.application.config.x.kubernetes = { readiness: { path: "/health/readyz" } }
-    Rails.application.config.x.kubernetes_definition_loaded = true
 
     assert_equal "/health/readyz", Rails::HealthController.readiness_path
   ensure
     Rails.application.config.x.kubernetes = original_config
-    Rails.application.config.x.kubernetes_definition_loaded = original_loaded_flag
   end
 
   test "health controller liveness path can be configured via container definition" do
     original_config = Rails.application.config.x.kubernetes
-    original_loaded_flag = Rails.application.config.x.kubernetes_definition_loaded
     Rails.application.config.x.kubernetes = { liveness: { path: "/health/livez" } }
-    Rails.application.config.x.kubernetes_definition_loaded = true
 
     assert_equal "/health/livez", Rails::HealthController.liveness_path
   ensure
     Rails.application.config.x.kubernetes = original_config
-    Rails.application.config.x.kubernetes_definition_loaded = original_loaded_flag
   end
 
 end
