@@ -174,20 +174,28 @@ module Rails
           liveness_route_defined = app.routes.named_routes.key?(:rails_liveness_check) ||
             app.routes.from_requirements(controller: "rails/health", action: "live")
 
-          unless liveness_route_defined
-            app.routes.append do
-              get Rails::HealthController.liveness_path.delete_prefix("/") => "rails/health#live",
-                as: :rails_liveness_check
-            end
-          end
-
           readiness_route_defined = app.routes.named_routes.key?(:rails_readiness_check) ||
             app.routes.from_requirements(controller: "rails/health", action: "ready")
 
-          unless readiness_route_defined
-            app.routes.append do
-              get Rails::HealthController.readiness_path.delete_prefix("/") => "rails/health#ready",
-                as: :rails_readiness_check
+          # Container 層の Health Probe ルートは prepend(先頭挿入)で登録する。
+          # append(末尾追加)だと、アプリが `match "*unmatched_route"` のような
+          # catch-all ルートを持つ場合(例: Mastodon)、catch-all が先にマッチして
+          # ヘルスエンドポイントが 404 になり到達不能になる。prepend なら
+          # アプリのルート定義より前に来るため、catch-all の有無に関わらず確実に
+          # 有効化される。
+          # prepend ブロックは instance_eval で self だけが差し替わり、ブロックの
+          # クロージャ(ローカル変数)は保持されるため、パスと登録要否フラグを
+          # ローカル変数で受け渡す。
+          add_liveness  = !liveness_route_defined
+          add_readiness = !readiness_route_defined
+
+          if add_liveness || add_readiness
+            liveness_path  = Rails::HealthController.liveness_path.delete_prefix("/")
+            readiness_path = Rails::HealthController.readiness_path.delete_prefix("/")
+
+            app.routes.prepend do
+              get(liveness_path  => "rails/health#live",  as: :rails_liveness_check)  if add_liveness
+              get(readiness_path => "rails/health#ready", as: :rails_readiness_check) if add_readiness
             end
           end
         end
