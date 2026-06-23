@@ -1,10 +1,35 @@
 # frozen_string_literal: true
 
 require "abstract_unit"
+require "etc"
 require "rails/container"
 
 class Rails::ContainerLayerTest < ActiveSupport::TestCase
   PLATFORM_ENV = %w[CONTAINER_PLATFORM KUBERNETES_SERVICE_HOST POD_NAME POD_NAMESPACE NODE_NAME POD_IP POD_SERVICE_ACCOUNT].freeze
+
+  # Stand-in for the OS privilege syscalls so a non-root test runner can model
+  # "currently root" and observe the drop without actually changing the process.
+  class FakeSyscalls
+    attr_reader :calls
+    attr_accessor :ignore_setuid
+
+    def initialize(start_uid:, start_euid: nil)
+      @uid = start_uid
+      @euid = start_euid.nil? ? start_uid : start_euid
+      @gid = start_uid
+      @egid = start_uid
+      @calls = []
+      @ignore_setuid = false
+    end
+
+    def uid = @uid
+    def euid = @euid
+    def gid = @gid
+    def egid = @egid
+    def initgroups(user, gid) = @calls << [:initgroups, user, gid]
+    def setgid(gid) = (@calls << [:setgid, gid]; @gid = @egid = gid)
+    def setuid(uid) = (@calls << [:setuid, uid]; @uid = @euid = uid unless @ignore_setuid)
+  end
 
   setup do
     @saved = ENV.slice(*PLATFORM_ENV)
@@ -12,6 +37,7 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
     Rails::Container.reset_checks
     Rails::Container.reset_init
     Rails::Container::GracefulShutdown.reset!
+    Rails::Container::Privilege.reset!
     @orig_config = Rails.application.config.x.container
     Rails.application.config.x.container = { diagnostics: {} }
   end
@@ -22,6 +48,7 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
     Rails::Container.reset_checks
     Rails::Container.reset_init
     Rails::Container::GracefulShutdown.reset!
+    Rails::Container::Privilege.reset!
     Rails.application.config.x.container = @orig_config
   end
 
@@ -128,5 +155,92 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
     ENV["POD_NAMESPACE"] = "prod"
     ENV["NODE_NAME"] = "node-1"
     assert_nil Rails::Container.self_awareness_problem
+  end
+
+  test "process_containment_problem warns on kubernetes only while running as root" do
+    ENV["CONTAINER_PLATFORM"] = "kubernetes"
+
+    Rails::Container::Privilege.syscalls = FakeSyscalls.new(start_uid: 0)
+    assert Rails::Container.process_containment_problem
+
+    Rails::Container::Privilege.syscalls = FakeSyscalls.new(start_uid: 1000)
+    assert_nil Rails::Container.process_containment_problem
+  end
+
+  test "process_containment_problem stays silent off kubernetes even as root" do
+    Rails::Container::Privilege.syscalls = FakeSyscalls.new(start_uid: 0)
+    assert_nil Rails::Container.process_containment_problem # platform :local
+  end
+
+  # Process Containment: privilege drop ------------------------------------
+
+  test "drop_to lowers gid before uid and reports the drop" do
+    name = Etc.getpwuid(Process.uid).name
+    fake = FakeSyscalls.new(start_uid: 0)
+    Rails::Container::Privilege.syscalls = fake
+
+    result = Rails::Container::Privilege.drop_to(user: name)
+
+    assert_equal :dropped, result.status
+    ops = fake.calls.map(&:first)
+    assert_equal [:initgroups, :setgid, :setuid], ops,
+      "supplementary groups and gid must drop before uid"
+  end
+
+  test "drop_to is a noop when the process is already unprivileged" do
+    name = Etc.getpwuid(Process.uid).name
+    fake = FakeSyscalls.new(start_uid: 1000)
+    Rails::Container::Privilege.syscalls = fake
+
+    result = Rails::Container::Privilege.drop_to(user: name)
+
+    assert_equal :noop, result.status
+    assert_empty fake.calls, "must not touch syscalls when there is nothing to drop"
+  end
+
+  test "drop_to raises for an unknown user (fails fast on misconfiguration)" do
+    assert_raises(ArgumentError) do
+      Rails::Container::Privilege.drop_to(user: "no_such_user_zzz_#{Process.pid}")
+    end
+  end
+
+  test "drop_to fails closed when the drop does not take effect" do
+    name = Etc.getpwuid(Process.uid).name
+    fake = FakeSyscalls.new(start_uid: 0)
+    fake.ignore_setuid = true
+    Rails::Container::Privilege.syscalls = fake
+
+    assert_raises(Rails::Container::Privilege::DropError) do
+      Rails::Container::Privilege.drop_to(user: name)
+    end
+  end
+
+  test "drop_to still drops when only the effective uid is root" do
+    name = Etc.getpwuid(Process.uid).name
+    # Real uid non-root but effective uid 0: still effectively root, not a noop.
+    fake = FakeSyscalls.new(start_uid: 1000, start_euid: 0)
+    Rails::Container::Privilege.syscalls = fake
+
+    result = Rails::Container::Privilege.drop_to(user: name)
+
+    assert_equal :dropped, result.status
+    refute_empty fake.calls, "must drop while the effective uid is still root"
+  end
+
+  test "drop_to refuses a root target (would verify yet stay privileged)" do
+    fake = FakeSyscalls.new(start_uid: 0)
+    Rails::Container::Privilege.syscalls = fake
+
+    assert_raises(ArgumentError) do
+      Rails::Container::Privilege.drop_to(user: "root")
+    end
+    assert_empty fake.calls, "must not touch syscalls when refusing a root target"
+  end
+
+  test "process_containment_problem warns when only the effective uid is root" do
+    ENV["CONTAINER_PLATFORM"] = "kubernetes"
+    Rails::Container::Privilege.syscalls = FakeSyscalls.new(start_uid: 1000, start_euid: 0)
+
+    assert Rails::Container.process_containment_problem
   end
 end

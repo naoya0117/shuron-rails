@@ -91,4 +91,65 @@ class ManifestAnnotatorTest < Minitest::Test
   ensure
     bad.unlink
   end
+
+  # Process Containment: securityContext injection -------------------------
+
+  SECURITY = {
+    run_as_non_root: true,
+    allow_privilege_escalation: false,
+    drop_capabilities: ["ALL"]
+  }.freeze
+
+  def test_injects_secure_default_security_context
+    Rails::Kubernetes::ManifestAnnotator.annotate!(@file.path, pre_stop_delay: "15s", security: SECURITY)
+    sc = container_security_context
+    assert_equal true, sc["runAsNonRoot"]
+    assert_equal false, sc["allowPrivilegeEscalation"]
+    assert_equal({ "drop" => ["ALL"] }, sc["capabilities"])
+  end
+
+  def test_read_only_root_filesystem_is_opt_in
+    Rails::Kubernetes::ManifestAnnotator.annotate!(@file.path, pre_stop_delay: "15s", security: SECURITY)
+    refute container_security_context.key?("readOnlyRootFilesystem"), "must stay off unless requested"
+
+    Rails::Kubernetes::ManifestAnnotator.annotate!(@file.path, pre_stop_delay: "15s",
+      security: SECURITY.merge(read_only_root_filesystem: true))
+    assert_equal true, container_security_context["readOnlyRootFilesystem"]
+  end
+
+  def test_security_context_does_not_clobber_existing_values
+    manifest = YAML.load_file(@file.path)
+    manifest["spec"]["template"]["spec"]["containers"][0]["securityContext"] = { "runAsNonRoot" => false }
+    File.write(@file.path, YAML.dump(manifest))
+
+    Rails::Kubernetes::ManifestAnnotator.annotate!(@file.path, pre_stop_delay: "15s", security: SECURITY)
+    sc = container_security_context
+    assert_equal false, sc["runAsNonRoot"], "user-set value must win"
+    assert_equal false, sc["allowPrivilegeEscalation"], "still fills the unset keys"
+  end
+
+  def test_security_can_be_disabled
+    Rails::Kubernetes::ManifestAnnotator.annotate!(@file.path, pre_stop_delay: "15s",
+      security: { enabled: false })
+    refute container.key?("securityContext")
+  end
+
+  def test_no_security_argument_leaves_manifest_untouched
+    Rails::Kubernetes::ManifestAnnotator.annotate!(@file.path, pre_stop_delay: "15s")
+    refute container.key?("securityContext"), "backward compatible: no security arg => no injection"
+  end
+
+  def test_process_containment_comment_inserted
+    Rails::Kubernetes::ManifestAnnotator.annotate!(@file.path, pre_stop_delay: "15s", security: SECURITY)
+    assert_includes File.read(@file.path), "# shuron-rails Kubernetes layer (Process Containment - injected after kompose)"
+  end
+
+  private
+    def container
+      YAML.load_file(@file.path).dig("spec", "template", "spec", "containers", 0)
+    end
+
+    def container_security_context
+      container.fetch("securityContext")
+    end
 end

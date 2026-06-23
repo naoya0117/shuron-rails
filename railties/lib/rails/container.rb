@@ -2,6 +2,7 @@
 
 require "rails/container/config_loader"
 require "rails/container/graceful_shutdown"
+require "rails/container/privilege"
 
 module Rails
   # = \Rails \Container layer
@@ -137,6 +138,23 @@ module Rails
         return unless GracefulShutdown.hooks.empty?
 
         "no graceful-shutdown hooks registered (use Rails::Container::GracefulShutdown.on_shutdown)"
+      end
+
+      # Process Containment: warns on Kubernetes when the process is running as
+      # root -- either the real or the effective uid is 0, since an effective
+      # uid of 0 still carries full privilege. The Restricted Pod Security
+      # Standard rejects this, and it leaves any app-layer compromise running
+      # with host-equivalent privileges. Surfacing it here is what gives this
+      # pattern a Container-layer (code) foothold: Docker development silently
+      # runs as root, so the requirement stays invisible until the cluster
+      # rejects the Pod.
+      def process_containment_problem
+        return unless platform == :kubernetes
+        return unless Privilege.syscalls.uid.zero? || Privilege.syscalls.euid.zero?
+
+        "running as root (uid 0); the Kubernetes Restricted Pod Security Standard rejects this. " \
+          "Run as non-root (securityContext.runAsNonRoot / allowPrivilegeEscalation: false) " \
+          "or drop privileges at boot (Rails::Container::Privilege.drop_to)"
       end
 
       # Warns on Kubernetes when the Downward API identity was not injected.

@@ -21,6 +21,17 @@ Rails.application.configure do
       pre_stop_delay: "15s",
       # terminationGracePeriodSeconds。SIGTERM〜SIGKILL の全体タイムアウト
       grace_period: "60s"
+    },
+    process_containment: {
+      # 生成マニフェストに注入する securityContext（Process Containment）。
+      # secure by default: そもそも root で動かさない方が、後から降格するより堅い。
+      # kubelet が起動前に強制するため、アプリ内降格より強い防御線になる。
+      run_as_non_root: true,
+      allow_privilege_escalation: false,
+      drop_capabilities: ["ALL"]
+      # read_only_root_filesystem: true  # opt-in: ルートFSに書かないイメージ前提
+      # run_as_user: 1000                # 任意: 実行 UID を固定
+      # enabled: false                   # securityContext 注入をまるごと無効化
     }
   }
 end
@@ -31,3 +42,11 @@ end
 # Rails::Container::GracefulShutdown.on_shutdown do
 #   Sidekiq.shutdown if defined?(Sidekiq)
 # end
+
+# Process Containment (optional). The container layer warns on Kubernetes when
+# the process runs as root (run `bin/rails container:doctor` to preflight).
+# Prefer never being root via the manifest's securityContext (runAsNonRoot:
+# true). Only if the process must start as root -- e.g. to bind a privileged
+# port -- drop to an unprivileged user once that work is done:
+#
+# Rails::Container::Privilege.drop_to(user: "app", group: "app")

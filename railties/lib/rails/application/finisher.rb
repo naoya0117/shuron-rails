@@ -25,6 +25,9 @@ module Rails
         Rails::Container.register_check(:self_awareness, severity: :warn) do
           Rails::Container.self_awareness_problem
         end
+        Rails::Container.register_check(:process_containment, severity: :warn) do
+          Rails::Container.process_containment_problem
+        end
 
         app.config.after_initialize do
           Rails::Container.emit_diagnostics if Rails::Container.platform == :kubernetes

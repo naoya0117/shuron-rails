@@ -89,10 +89,29 @@ namespace :kubernetes do
     settings = Rails.application.config.x.container || {}
     graceful = settings[:graceful_shutdown] || settings["graceful_shutdown"] || {}
     pre_stop_delay = graceful[:pre_stop_delay] || graceful["pre_stop_delay"] || "15s"
+    security = resolve_process_containment(settings)
 
     Dir.glob(File.join(output_dir, "*-deployment.yaml")).each do |path|
-      Rails::Kubernetes::ManifestAnnotator.annotate!(path, pre_stop_delay: pre_stop_delay)
+      Rails::Kubernetes::ManifestAnnotator.annotate!(path, pre_stop_delay: pre_stop_delay, security: security)
       puts "Annotated #{path}"
     end
+  end
+
+  # Resolves the Process Containment securityContext to inject. Secure by
+  # default (never root, no privilege escalation, drop all capabilities);
+  # readOnlyRootFilesystem and runAsUser stay unset unless configured, and the
+  # whole block can be turned off with `process_containment: { enabled: false }`.
+  def resolve_process_containment(settings)
+    pc = settings[:process_containment] || settings["process_containment"] || {}
+    pc = pc.transform_keys(&:to_sym)
+    return { enabled: false } if pc[:enabled] == false
+
+    {
+      run_as_non_root:            pc.fetch(:run_as_non_root, true),
+      allow_privilege_escalation: pc.fetch(:allow_privilege_escalation, false),
+      drop_capabilities:          pc.fetch(:drop_capabilities, ["ALL"]),
+      read_only_root_filesystem:  pc[:read_only_root_filesystem],
+      run_as_user:                pc[:run_as_user]
+    }
   end
 end
