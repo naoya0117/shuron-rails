@@ -20,4 +20,21 @@ namespace :container do
       end
     end
   end
+
+  desc "Report the container-layer conformance matrix (Layer 1; CONTAINER_PLATFORM=kubernetes to preflight)"
+  task conformance: :environment do
+    require "rails/container/conformance"
+
+    results = Rails::Container::Conformance.run
+    label = { pass: "PASS", fail: "FAIL", na: "N/A ", skip: "SKIP" }
+    width = results.map { |r| r.pattern.length }.max
+
+    puts "[container] conformance (platform=#{Rails::Container.platform})"
+    results.each do |r|
+      puts "  [#{label[r.status] || r.status}] #{r.pattern.ljust(width)}  #{r.detail}"
+    end
+
+    failed = results.select { |r| r.status == :fail }
+    abort "[container] conformance FAILED: #{failed.map(&:pattern).join(', ')}" unless failed.empty?
+  end
 end
