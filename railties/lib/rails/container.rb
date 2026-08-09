@@ -157,7 +157,12 @@ module Rails
         settings = config[:process_containment] || {}
         target = fetch_setting(settings, :drop_privileges)
         return if target.nil? || target == false
-        return unless Process.uid.zero?
+        # Nothing to drop -- and nothing we *could* drop: handing files over and
+        # calling initgroups both need privilege, so attempting either while
+        # already unprivileged would raise EPERM instead of no-oping. The check
+        # mirrors Privilege.drop_to: an effective uid of 0 still carries full
+        # privilege, so only a process that is non-root by both measures is done.
+        return unless Privilege.syscalls.uid.zero? || Privilege.syscalls.euid.zero?
 
         target = fetch_setting(settings, :run_as_user) if target == true
         raise ArgumentError, "drop_privileges requires run_as_user or an explicit user" if target.nil?

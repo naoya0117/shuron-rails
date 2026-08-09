@@ -96,17 +96,25 @@ class Rails::ContainerPrivilegeTest < ActiveSupport::TestCase
 
   test "contain_process! does nothing when drop_privileges is not declared" do
     Rails.application.config.x.container = { process_containment: { run_as_user: 2000 } }
-    Process.stub(:uid, 0) do
-      assert_nil Rails::Container.contain_process!
-    end
+    assert_nil Rails::Container.contain_process!
   end
 
   test "contain_process! does nothing when the process is not root" do
     Rails.application.config.x.container = {
       process_containment: { run_as_user: 2000, drop_privileges: true }
     }
-    Process.stub(:uid, 2000) do
-      assert_nil Rails::Container.contain_process!
+    # Already unprivileged by both measures: attempting the handover or
+    # initgroups here would raise EPERM, so the layer must stay out.
+    Rails::Container::Privilege.syscalls = FakeSyscalls.new(uid: 2000, gid: 2000)
+    assert_nil Rails::Container.contain_process!
+  end
+
+  test "contain_process! still drops when only the effective uid is root" do
+    Rails.application.config.x.container = {
+      process_containment: { run_as_user: 2000, drop_privileges: true }
+    }
+    Etc.stub(:getpwuid, Pwent.new("app", 2000, 2000)) do
+      assert_equal :dropped, Rails::Container.contain_process!.status
     end
   end
 
@@ -115,13 +123,11 @@ class Rails::ContainerPrivilegeTest < ActiveSupport::TestCase
       process_containment: { run_as_user: 2000, drop_privileges: true }
     }
     pwent = Pwent.new("app", 2000, 2000)
-    Process.stub(:uid, 0) do
-      Etc.stub(:getpwuid, pwent) do
-        result = Rails::Container.contain_process!
+    Etc.stub(:getpwuid, pwent) do
+      result = Rails::Container.contain_process!
 
-        assert_equal :dropped, result.status
-        assert_equal 2000, result.uid
-      end
+      assert_equal :dropped, result.status
+      assert_equal 2000, result.uid
     end
   end
 
@@ -130,20 +136,16 @@ class Rails::ContainerPrivilegeTest < ActiveSupport::TestCase
       process_containment: { drop_privileges: "app" }
     }
     pwent = Pwent.new("app", 2000, 2000)
-    Process.stub(:uid, 0) do
-      Etc.stub(:getpwnam, pwent) do
-        Etc.stub(:getpwuid, pwent) do
-          assert_equal :dropped, Rails::Container.contain_process!.status
-        end
+    Etc.stub(:getpwnam, pwent) do
+      Etc.stub(:getpwuid, pwent) do
+        assert_equal :dropped, Rails::Container.contain_process!.status
       end
     end
   end
 
   test "contain_process! requires a target when drop_privileges is true" do
     Rails.application.config.x.container = { process_containment: { drop_privileges: true } }
-    Process.stub(:uid, 0) do
-      assert_raises(ArgumentError) { Rails::Container.contain_process! }
-    end
+    assert_raises(ArgumentError) { Rails::Container.contain_process! }
   end
 
   test "contain_process! hands declared paths to the target before dropping" do
@@ -152,14 +154,12 @@ class Rails::ContainerPrivilegeTest < ActiveSupport::TestCase
     }
     pwent = Pwent.new("app", 2000, 2000)
     chowned = []
-    Process.stub(:uid, 0) do
-      Etc.stub(:getpwuid, pwent) do
-        FileUtils.stub(:mkdir_p, nil) do
-          # Root-owned path: the layer must hand it over before privileges go.
-          File.stub(:stat, Struct.new(:uid).new(0)) do
-            FileUtils.stub(:chown_R, ->(uid, gid, path) { chowned << [uid, gid, path.to_s] }) do
-              assert_equal :dropped, Rails::Container.contain_process!.status
-            end
+    Etc.stub(:getpwuid, pwent) do
+      FileUtils.stub(:mkdir_p, nil) do
+        # Root-owned path: the layer must hand it over before privileges go.
+        File.stub(:stat, Struct.new(:uid).new(0)) do
+          FileUtils.stub(:chown_R, ->(uid, gid, path) { chowned << [uid, gid, path.to_s] }) do
+            assert_equal :dropped, Rails::Container.contain_process!.status
           end
         end
       end
@@ -176,13 +176,11 @@ class Rails::ContainerPrivilegeTest < ActiveSupport::TestCase
       process_containment: { run_as_user: 2000, drop_privileges: true, ensure_writable: ["log"] }
     }
     pwent = Pwent.new("app", 2000, 2000)
-    Process.stub(:uid, 0) do
-      Etc.stub(:getpwuid, pwent) do
-        FileUtils.stub(:mkdir_p, nil) do
-          File.stub(:stat, Struct.new(:uid).new(2000)) do
-            FileUtils.stub(:chown_R, ->(*) { flunk "should not chown an already-owned path" }) do
-              assert_equal :dropped, Rails::Container.contain_process!.status
-            end
+    Etc.stub(:getpwuid, pwent) do
+      FileUtils.stub(:mkdir_p, nil) do
+        File.stub(:stat, Struct.new(:uid).new(2000)) do
+          FileUtils.stub(:chown_R, ->(*) { flunk "should not chown an already-owned path" }) do
+            assert_equal :dropped, Rails::Container.contain_process!.status
           end
         end
       end
@@ -194,10 +192,8 @@ class Rails::ContainerPrivilegeTest < ActiveSupport::TestCase
       process_containment: { "run_as_user" => 2000, "drop_privileges" => true }
     }
     pwent = Pwent.new("app", 2000, 2000)
-    Process.stub(:uid, 0) do
-      Etc.stub(:getpwuid, pwent) do
-        assert_equal :dropped, Rails::Container.contain_process!.status
-      end
+    Etc.stub(:getpwuid, pwent) do
+      assert_equal :dropped, Rails::Container.contain_process!.status
     end
   end
 end
