@@ -130,6 +130,43 @@ module Rails
         )
       end
 
+      # --- Process Containment -------------------------------------------
+
+      # Applies the declared Process Containment posture to the running process.
+      #
+      # Images that start as root need two things before they can run
+      # unprivileged: the paths the app writes to must belong to the target
+      # user, and the process must then drop to it permanently. Apps otherwise
+      # hand-roll both steps in arbitrary places (chown here, setuid there), so
+      # the layer takes them as declaration in +config/container.rb+:
+      #
+      #   process_containment: {
+      #     run_as_user:     2000,               # target (also used by the manifest)
+      #     drop_privileges: true,               # perform the in-process drop
+      #     ensure_writable: ["log", "tmp"]      # chown these to the target first
+      #   }
+      #
+      # +drop_privileges+ may also name the user explicitly (<tt>"docuseal"</tt>
+      # or a uid) when it differs from +run_as_user+. Nothing happens unless the
+      # process is root, so the same configuration is inert in local development
+      # and on images that already run unprivileged (which is the better posture:
+      # in Kubernetes prefer +securityContext+, see Privilege).
+      #
+      # Returns the Privilege::DropResult, or +nil+ when no drop was requested.
+      def contain_process!
+        settings = config[:process_containment] || {}
+        target = fetch_setting(settings, :drop_privileges)
+        return if target.nil? || target == false
+        return unless Process.uid.zero?
+
+        target = fetch_setting(settings, :run_as_user) if target == true
+        raise ArgumentError, "drop_privileges requires run_as_user or an explicit user" if target.nil?
+
+        pwent = Privilege.passwd_for(target)
+        ensure_writable!(Array(fetch_setting(settings, :ensure_writable)), pwent)
+        Privilege.drop_to(user: pwent.uid, group: fetch_setting(settings, :run_as_group))
+      end
+
       # --- Built-in diagnostics ------------------------------------------
 
       # Warns on Kubernetes when no graceful-shutdown hook is registered.
@@ -168,6 +205,35 @@ module Rails
       end
 
       private
+        # Reads a Symbol key from container settings, tolerating the string-keyed
+        # Hash that +kubernetes:convert+ writes (mirrors HealthController).
+        def fetch_setting(settings, key)
+          return unless settings.respond_to?(:key?)
+
+          if settings.key?(key)
+            settings[key]
+          elsif settings.key?(key.to_s)
+            settings[key.to_s]
+          end
+        end
+
+        # Creates the declared paths (relative to Rails.root) and hands them to
+        # the target user, so the app can still write after the drop. Done while
+        # still root -- afterwards the process no longer has the privilege. Paths
+        # already owned by the target are left alone, keeping restarts cheap.
+        def ensure_writable!(paths, pwent)
+          return if paths.empty?
+
+          require "fileutils"
+          paths.each do |path|
+            full = Rails.root.join(path.to_s)
+            FileUtils.mkdir_p(full)
+            next if File.stat(full).uid == pwent.uid
+
+            FileUtils.chown_R(pwent.uid, pwent.gid, full)
+          end
+        end
+
         def run_checks
           checks.filter_map do |check|
             message = check.block.call

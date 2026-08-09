@@ -643,6 +643,14 @@ module Rails
     initializer :load_container_definition, before: :load_config_initializers do
       require "rails/container"
       Rails::Container::ConfigLoader.load!
+
+      # Process Containment: apply the declared posture as early as the settings
+      # allow -- before config initializers and long before the server binds --
+      # so the rest of boot already runs unprivileged. A no-op unless the process
+      # is root and the app declared drop_privileges.
+      if (result = Rails::Container.contain_process!)
+        Rails.logger&.info("[container] process_containment: #{result.status} uid=#{result.uid} gid=#{result.gid}")
+      end
     end
 
     initializer :load_config_initializers do

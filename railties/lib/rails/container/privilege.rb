@@ -51,6 +51,13 @@ module Rails
           @syscalls = nil
         end
 
+        # The passwd entry for a user name or numeric uid. Exposed so callers can
+        # resolve the target once and reuse its uid/gid (e.g. to hand files over
+        # before dropping).
+        def passwd_for(user)
+          resolve_user(user)
+        end
+
         # Permanently drops to +user+ (and +group+, defaulting to the user's
         # primary group). Resolution happens first so a bad user/group fails
         # fast even during local development. Supplementary groups and the gid
@@ -58,8 +65,8 @@ module Rails
         # the privilege needed to change the others. Returns a DropResult;
         # raises DropError if the drop did not verifiably take effect.
         def drop_to(user:, group: nil)
-          user = user.to_s
-          pwent = Etc.getpwnam(user)
+          pwent = resolve_user(user)
+          user = pwent.name
           target_uid = pwent.uid
           target_gid = group ? resolve_gid(group) : pwent.gid
 
@@ -88,6 +95,16 @@ module Rails
         end
 
         private
+          # Accepts a user name or a numeric uid. A uid is resolved back to its
+          # passwd entry because +initgroups+ needs the user's *name*, and the
+          # entry also supplies the primary gid when no group was given.
+          def resolve_user(user)
+            case user
+            when Integer then Etc.getpwuid(user)
+            else Etc.getpwnam(user.to_s)
+            end
+          end
+
           def resolve_gid(group)
             return group if group.is_a?(Integer)
 
