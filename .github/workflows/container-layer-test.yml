@@ -1,0 +1,72 @@
+# MVCCo / Container 層のユニットテスト([[evaluation-methodology]] の Layer 0)
+#
+# フォークが追加した Container 層(Rails::Container / Rails::Kubernetes /
+# HealthController)の単体テストを回し、フレームワーク本体の回帰を検知する。
+#
+# DB は不要(HealthController の readiness テストは接続を stub する)。
+# private フォークだが自リポジトリのチェックアウトのみで完結するため、
+# GITHUB_TOKEN 以外のシークレットは要らない。
+name: Container layer tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'railties/lib/rails/container/**'
+      - 'railties/lib/rails/container.rb'
+      - 'railties/lib/rails/kubernetes/**'
+      - 'railties/lib/rails/health_controller.rb'
+      - 'railties/lib/rails/tasks/container.rake'
+      - 'railties/lib/rails/tasks/kubernetes.rake'
+      - 'railties/lib/rails/application/finisher.rb'
+      - 'railties/test/container/**'
+      - 'railties/test/kubernetes/**'
+      - 'railties/test/rails_health_controller_test.rb'
+      - '.github/workflows/container-layer-test.yml'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # 依存の重い group は不要(DB アダプタ・ドキュメント生成・lint 等)
+      BUNDLE_WITHOUT: db:doc:mdl:rubocop:job:storage:cable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libxml2-dev libxslt1-dev
+
+      - name: Run Container layer unit tests
+        working-directory: railties
+        run: |
+          set -e
+          for f in \
+            test/container/container_layer_test.rb \
+            test/container/graceful_shutdown_test.rb \
+            test/container/conformance_test.rb \
+            test/kubernetes/manifest_annotator_test.rb \
+            test/kubernetes/override_builder_test.rb \
+            test/rails_health_controller_test.rb
+          do
+            echo "::group::$f"
+            bundle exec ruby -Itest "$f"
+            echo "::endgroup::"
+          done
