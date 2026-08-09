@@ -37,6 +37,8 @@ module Rails
         def initgroups(user, gid) = Process.initgroups(user, gid)
         def setgid(gid) = Process::Sys.setgid(gid)
         def setuid(uid) = Process::Sys.setuid(uid)
+        def seteuid(uid) = Process::Sys.seteuid(uid)
+        def setegid(gid) = Process::Sys.setegid(gid)
       end
 
       class << self
@@ -86,6 +88,14 @@ module Rails
             return DropResult.new(status: :noop, uid: syscalls.uid, gid: syscalls.gid)
           end
 
+          # An app that already lowered only its *effective* ids (a partial drop
+          # via seteuid, as some images do in their own boot code) leaves the
+          # process real-root but without the effective privilege initgroups
+          # needs -- the drop would fail with EPERM. Restoring the effective ids
+          # from the real ones is permitted precisely because the real uid is
+          # still 0, so reclaim them and proceed to drop everything for good.
+          reclaim_effective_privilege if syscalls.uid.zero? && !syscalls.euid.zero?
+
           syscalls.initgroups(user, target_gid)
           syscalls.setgid(target_gid)
           syscalls.setuid(target_uid)
@@ -95,6 +105,13 @@ module Rails
         end
 
         private
+          # Raises the effective ids back to the real (root) ones so the drop can
+          # run. Only reachable while the real uid is 0.
+          def reclaim_effective_privilege
+            syscalls.setegid(syscalls.gid)
+            syscalls.seteuid(syscalls.uid)
+          end
+
           # Accepts a user name or a numeric uid. A uid is resolved back to its
           # passwd entry because +initgroups+ needs the user's *name*, and the
           # entry also supplies the primary gid when no group was given.

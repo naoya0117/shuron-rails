@@ -31,6 +31,35 @@ class Rails::ContainerPrivilegeTest < ActiveSupport::TestCase
     def setuid(_uid) = nil
   end
 
+  # Mimics an app that lowered only its effective ids in its own boot code
+  # (real uid stays 0). initgroups then needs effective privilege, so it fails
+  # until the layer reclaims it -- exactly what DocuSeal's config/dotenv.rb does.
+  class PartiallyDroppedSyscalls < FakeSyscalls
+    attr_reader :ops
+
+    def initialize
+      super(uid: 0, gid: 0)
+      @euid = 2000
+      @egid = 2000
+      @ops = []
+    end
+
+    def euid = @euid
+    def egid = @egid
+    def seteuid(uid) = (@ops << :seteuid; @euid = uid)
+    def setegid(gid) = (@ops << :setegid; @egid = gid)
+
+    def initgroups(user, gid)
+      raise Errno::EPERM unless @euid.zero?
+
+      @ops << :initgroups
+      super
+    end
+
+    def setgid(gid) = (@ops << :setgid; @gid = @egid = gid)
+    def setuid(uid) = (@ops << :setuid; @uid = @euid = uid)
+  end
+
   Pwent = Struct.new(:name, :uid, :gid)
 
   setup do
@@ -74,6 +103,19 @@ class Rails::ContainerPrivilegeTest < ActiveSupport::TestCase
     Rails::Container::Privilege.syscalls = FakeSyscalls.new(uid: 2000, gid: 2000)
     Etc.stub(:getpwnam, Pwent.new("app", 2000, 2000)) do
       assert_equal :noop, Rails::Container::Privilege.drop_to(user: "app").status
+    end
+  end
+
+  test "drop_to reclaims effective privilege when the app dropped only its euid" do
+    fake = PartiallyDroppedSyscalls.new
+    Rails::Container::Privilege.syscalls = fake
+    Etc.stub(:getpwnam, Pwent.new("app", 2000, 2000)) do
+      result = Rails::Container::Privilege.drop_to(user: "app")
+
+      assert_equal :dropped, result.status
+      # Effective ids are raised back to root *before* initgroups, which would
+      # otherwise raise EPERM, then everything is dropped for good.
+      assert_equal [:setegid, :seteuid, :initgroups, :setgid, :setuid], fake.ops
     end
   end
 
