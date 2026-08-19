@@ -132,25 +132,36 @@ module Rails
 
       # --- Process Containment -------------------------------------------
 
-      # Applies the declared Process Containment posture to the running process.
+      # Drops the process to the declared unprivileged user, handing over the
+      # paths it must keep writing to first.
       #
-      # Images that start as root need two things before they can run
-      # unprivileged: the paths the app writes to must belong to the target
-      # user, and the process must then drop to it permanently. Apps otherwise
-      # hand-roll both steps in arbitrary places (chown here, setuid there), so
-      # the layer takes them as declaration in +config/container.rb+:
+      # NOT called during boot, by design. The supported way to stop running as
+      # root is the platform's own control: the +process_containment+ settings
+      # already generate a +securityContext+ (+runAsNonRoot+, no privilege
+      # escalation, all capabilities dropped) for the manifest, which the kubelet
+      # enforces externally *before* the process starts. An in-process drop is
+      # strictly weaker -- code runs as root until it happens, it is voluntary,
+      # and changing uid mid-boot surprises anything else in the process (build
+      # steps writing under Rails.root, test suites, an app that already lowered
+      # only its effective ids). The layer therefore *reports* root execution
+      # through diagnostics rather than silently dropping.
+      #
+      # Call this explicitly, early, only for the residual case where the process
+      # genuinely must start as root (binding a privileged port, reading a
+      # root-owned file) and that work cannot move to an Init Container:
+      #
+      #   # config/container.rb, at the top
+      #   Rails::Container.contain_process!   # honours the settings below
       #
       #   process_containment: {
       #     run_as_user:     2000,               # target (also used by the manifest)
-      #     drop_privileges: true,               # perform the in-process drop
+      #     drop_privileges: true,               # opt in to the in-process drop
       #     ensure_writable: ["log", "tmp"]      # chown these to the target first
       #   }
       #
-      # +drop_privileges+ may also name the user explicitly (<tt>"docuseal"</tt>
-      # or a uid) when it differs from +run_as_user+. Nothing happens unless the
-      # process is root, so the same configuration is inert in local development
-      # and on images that already run unprivileged (which is the better posture:
-      # in Kubernetes prefer +securityContext+, see Privilege).
+      # +drop_privileges+ may also name the user explicitly (<tt>"app"</tt> or a
+      # uid) when it differs from +run_as_user+. A no-op unless the process is
+      # root and +drop_privileges+ is declared.
       #
       # Returns the Privilege::DropResult, or +nil+ when no drop was requested.
       def contain_process!
