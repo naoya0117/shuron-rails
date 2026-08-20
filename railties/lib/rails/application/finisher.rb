@@ -29,8 +29,14 @@ module Rails
           Rails::Container.process_containment_problem
         end
 
+        # Emitted on every platform, not just Kubernetes: the point of the layer
+        # is that the developer hears about a missing implementation while still
+        # working in Docker, rather than after the orchestrator surfaces it. The
+        # checks themselves decide what is relevant per platform -- a missing
+        # Downward API injection stays quiet off Kubernetes, a missing shutdown
+        # hook does not.
         app.config.after_initialize do
-          Rails::Container.emit_diagnostics if Rails::Container.platform == :kubernetes
+          Rails::Container.emit_diagnostics
         end
       end
 

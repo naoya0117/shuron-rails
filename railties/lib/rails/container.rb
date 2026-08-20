@@ -185,24 +185,32 @@ module Rails
 
       # --- Built-in diagnostics ------------------------------------------
 
-      # Warns on Kubernetes when no graceful-shutdown hook is registered.
+      # Warns when no graceful-shutdown hook is registered -- on every platform.
+      #
+      # This is a *missing application implementation*, not a missing platform
+      # feature, so the requirement does not change with where the app runs and
+      # neither does the warning. Gating it on Kubernetes would recreate the very
+      # problem this layer exists to solve: the developer works in Docker, hears
+      # nothing, and only learns of the gap once the orchestrator starts stopping
+      # Pods for rolling updates and scale-in.
       def managed_lifecycle_problem
-        return unless platform == :kubernetes
         return unless GracefulShutdown.hooks.empty?
 
-        "no graceful-shutdown hooks registered (use Rails::Container::GracefulShutdown.on_shutdown)"
+        "no graceful-shutdown hooks registered; orchestrators stop Pods routinely " \
+          "(rolling updates, scale-in), so register cleanup with " \
+          "Rails::Container::GracefulShutdown.on_shutdown"
       end
 
-      # Process Containment: warns on Kubernetes when the process is running as
-      # root -- either the real or the effective uid is 0, since an effective
-      # uid of 0 still carries full privilege. The Restricted Pod Security
-      # Standard rejects this, and it leaves any app-layer compromise running
-      # with host-equivalent privileges. Surfacing it here is what gives this
-      # pattern a Container-layer (code) foothold: Docker development silently
-      # runs as root, so the requirement stays invisible until the cluster
-      # rejects the Pod.
+      # Process Containment: warns when the process runs as root -- either the
+      # real or the effective uid is 0, since an effective uid of 0 still carries
+      # full privilege.
+      #
+      # Reported on every platform, because running as root is a property of the
+      # image and the app, not of the orchestrator: the Restricted Pod Security
+      # Standard will reject it later regardless of where the developer noticed.
+      # Docker development silently runs as root, which is exactly why the
+      # requirement stays invisible unless the layer says so up front.
       def process_containment_problem
-        return unless platform == :kubernetes
         return unless Privilege.syscalls.uid.zero? || Privilege.syscalls.euid.zero?
 
         "running as root (uid 0); the Kubernetes Restricted Pod Security Standard rejects this. " \
@@ -210,7 +218,12 @@ module Rails
           "or drop privileges at boot (Rails::Container::Privilege.drop_to)"
       end
 
-      # Warns on Kubernetes when the Downward API identity was not injected.
+      # Warns when the Downward API identity was not injected.
+      #
+      # Kubernetes-only on purpose, and the exception to the rule above: what is
+      # missing here is a value the *platform* supplies through the manifest, not
+      # an implementation the app forgot. Docker has no Downward API at all, so
+      # asking for POD_NAME there would be pure noise.
       def self_awareness_problem
         return unless platform == :kubernetes
 

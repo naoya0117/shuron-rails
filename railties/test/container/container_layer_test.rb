@@ -138,11 +138,17 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
 
   # Built-in diagnostics ---------------------------------------------------
 
-  test "managed_lifecycle_problem warns on kubernetes without shutdown hooks" do
-    ENV["CONTAINER_PLATFORM"] = "kubernetes"
-    assert Rails::Container.managed_lifecycle_problem
-    Rails::Container::GracefulShutdown.on_shutdown { }
-    assert_nil Rails::Container.managed_lifecycle_problem
+  test "managed_lifecycle_problem warns without shutdown hooks on any platform" do
+    # A missing implementation is missing everywhere: the developer must hear
+    # about it while still working locally, not only once on a cluster.
+    %w[local compose kubernetes].each do |platform|
+      ENV["CONTAINER_PLATFORM"] = platform
+      Rails::Container::GracefulShutdown.reset!
+      assert Rails::Container.managed_lifecycle_problem, "expected a warning on #{platform}"
+
+      Rails::Container::GracefulShutdown.on_shutdown { }
+      assert_nil Rails::Container.managed_lifecycle_problem, "expected silence once registered on #{platform}"
+    end
   end
 
   test "self_awareness_problem warns on kubernetes until all identity vars are injected" do
@@ -157,19 +163,25 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
     assert_nil Rails::Container.self_awareness_problem
   end
 
-  test "process_containment_problem warns on kubernetes only while running as root" do
-    ENV["CONTAINER_PLATFORM"] = "kubernetes"
+  test "process_containment_problem warns while running as root on any platform" do
+    # Running as root is a property of the image, not of the orchestrator, and
+    # Docker development is exactly where it stays invisible otherwise.
+    %w[local compose kubernetes].each do |platform|
+      ENV["CONTAINER_PLATFORM"] = platform
 
-    Rails::Container::Privilege.syscalls = FakeSyscalls.new(start_uid: 0)
-    assert Rails::Container.process_containment_problem
+      Rails::Container::Privilege.syscalls = FakeSyscalls.new(start_uid: 0)
+      assert Rails::Container.process_containment_problem, "expected a warning on #{platform}"
 
-    Rails::Container::Privilege.syscalls = FakeSyscalls.new(start_uid: 1000)
-    assert_nil Rails::Container.process_containment_problem
+      Rails::Container::Privilege.syscalls = FakeSyscalls.new(start_uid: 1000)
+      assert_nil Rails::Container.process_containment_problem, "expected silence as non-root on #{platform}"
+    end
   end
 
-  test "process_containment_problem stays silent off kubernetes even as root" do
-    Rails::Container::Privilege.syscalls = FakeSyscalls.new(start_uid: 0)
-    assert_nil Rails::Container.process_containment_problem # platform :local
+  test "self_awareness_problem stays silent off kubernetes (platform supplies the value)" do
+    # The exception to the rule: Docker has no Downward API to inject, so asking
+    # for POD_NAME there would be noise rather than a surfaced requirement.
+    ENV["CONTAINER_PLATFORM"] = "local"
+    assert_nil Rails::Container.self_awareness_problem
   end
 
   # Process Containment: privilege drop ------------------------------------
