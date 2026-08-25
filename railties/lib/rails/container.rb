@@ -151,6 +151,45 @@ module Rails
         )
       end
 
+      # --- Boot summary ---------------------------------------------------
+
+      # One line, at boot, recording what the layer resolved for this process.
+      #
+      # Without it, every one of these facts needs `rails container:conformance`
+      # run inside the container to observe -- which means the behaviour of a
+      # deployed Pod can only be checked by exec'ing into it. With it,
+      # `kubectl logs` and `docker compose logs` are enough, which is what makes
+      # a manifest or a compose file verifiable from outside.
+      #
+      # Deliberately one line per process, not one per pattern: the register-type
+      # mechanisms already emit their own execution events, and Health Probe's
+      # HTTP status is its own evidence. What is left is the *resolved state* --
+      # which platform was detected, whether the Downward API arrived, what
+      # privilege the process holds, how much was declared -- and that is a
+      # single snapshot.
+      def boot_summary
+        # Lazily required: container.rb is loaded very early in boot and
+        # health_controller pulls in action_controller.
+        require "rails/health_controller"
+
+        info = self_info
+        {
+          platform: platform,
+          uid: Privilege.syscalls.uid,
+          euid: Privilege.syscalls.euid,
+          identity: info.pod_name ? "injected" : "absent",
+          liveness: HealthController.liveness_path,
+          readiness: HealthController.readiness_path,
+          hooks: GracefulShutdown.hooks.size,
+          init_steps: init_steps.size,
+          checks: checks.size
+        }
+      end
+
+      def emit_boot_summary
+        Events.emit("boot", **boot_summary)
+      end
+
       # --- Built-in diagnostics ------------------------------------------
 
       # Warns when no graceful-shutdown hook is registered -- on every platform.

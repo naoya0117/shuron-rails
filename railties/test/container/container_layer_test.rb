@@ -133,6 +133,44 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
     assert ran
   end
 
+  # Boot summary -----------------------------------------------------------
+
+  test "boot_summary records the resolved state of every pattern" do
+    ENV["CONTAINER_PLATFORM"] = "kubernetes"
+    ENV["POD_NAME"] = "web-abc"
+    Rails::Container::Privilege.syscalls = FakeSyscalls.new(start_uid: 991)
+    Rails::Container.init_step(:db_migrate) { :ok }
+    Rails::Container::GracefulShutdown.on_shutdown { :ok }
+
+    summary = Rails::Container.boot_summary
+
+    assert_equal :kubernetes, summary[:platform]
+    assert_equal 991, summary[:uid]
+    assert_equal "injected", summary[:identity]
+    assert_equal 1, summary[:hooks]
+    assert_equal 1, summary[:init_steps]
+    assert_equal "/container/health/live", summary[:liveness]
+  end
+
+  # Off Kubernetes the identity is reported absent rather than omitted, so a log
+  # reader can tell "no Downward API here" from "the line was never emitted".
+  test "boot_summary reports the identity as absent off kubernetes" do
+    ENV["CONTAINER_PLATFORM"] = "compose"
+    ENV["POD_NAME"] = "web-abc"
+
+    assert_equal "absent", Rails::Container.boot_summary[:identity]
+  end
+
+  test "emit_boot_summary writes one line carrying the resolved state" do
+    ENV["CONTAINER_PLATFORM"] = "local"
+
+    line = Rails::Container.emit_boot_summary
+
+    assert_includes line, "#{Rails::Container::Events::PREFIX}boot "
+    assert_includes line, "platform=local"
+    assert_includes line, "identity=absent"
+  end
+
   # Self Awareness ---------------------------------------------------------
 
   test "self_info reads Downward API env on Kubernetes, nil off Kubernetes" do
