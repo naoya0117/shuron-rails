@@ -105,8 +105,21 @@ module Rails
       end
 
       # Runs each init step once, in order. Fails fast: a raising step aborts
-      # initialization, and the completion flag is only set after success so a
-      # retry re-runs the (idempotent) steps.
+      # initialization.
+      #
+      # The +@init_ran+ guard is a process-local re-entrancy guard and nothing
+      # more -- it is deliberately *not* a record of "initialization has been
+      # done". Nothing is persisted, so a fresh process knows nothing, and N
+      # replicas run this N times. Nor does a retry skip the steps that already
+      # succeeded: the flag is set only after the whole loop completes, so a
+      # failure leaves no record and the next attempt starts from the first step.
+      #
+      # That is the right shape for the pattern rather than a limitation of it.
+      # An Init Container is expected to be re-run -- the kubelet restarts it on
+      # failure -- so a layer that remembered "already done" and skipped work
+      # would be the dangerous design. The layer guarantees the re-run; whether
+      # a step is safe to re-run is the step's own business, which is what
+      # "init steps must be idempotent" means.
       #
       # Each step and the completion are recorded as events, so that "the steps
       # ran before traffic" is observable from outside the process rather than
