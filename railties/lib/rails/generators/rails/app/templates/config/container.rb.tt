@@ -36,18 +36,18 @@ Rails.application.configure do
   }
 end
 
-# Register graceful shutdown hooks (optional). Hooks run as the process
-# terminates, which covers SIGTERM from the orchestrator.
+# Managed Lifecycle: the SIGTERM handler. Hooks run as the process terminates,
+# which is how the orchestrator's stop signal arrives, and after the server has
+# drained its in-flight requests.
 #
-# Release resources this process holds -- nothing else. Hooks must be idempotent
-# and free of business side effects, because at_exit fires in *every* Ruby
-# process: a container that runs `rails db:prepare` and `rails container:init`
-# before starting its server runs them three times, twice while the app is
-# still booting. Work that must happen exactly once when the Pod stops belongs
-# in the preStop hook (generated from graceful_shutdown below); business logic
-# belongs in an init step, which runs once, before traffic, idempotently.
+# Act only on what *this process* owns, and be idempotent. at_exit also fires in
+# processes that were never serving -- `rails db:prepare` and `rails
+# container:init` on the way up -- so a hook scoped to this process is simply a
+# no-op there, while an unscoped one (every row, not just this Pod's) would
+# disturb other healthy Pods.
 #
 # Rails::Container::GracefulShutdown.on_shutdown do
+#   Order.processing_by(pod_name).cancel!                       # this Pod's work
 #   ActiveRecord::Base.connection_handler.clear_all_connections!
 # end
 

@@ -28,9 +28,6 @@ module Rails
         Rails::Container.register_check(:process_containment, severity: :warn) do
           Rails::Container.process_containment_problem
         end
-        Rails::Container.register_check(:serving_declaration, severity: :warn) do
-          Rails::Container.serving_declaration_problem
-        end
 
         # Emitted on every platform, not just Kubernetes: the point of the layer
         # is that the developer hears about a missing implementation while still
@@ -41,20 +38,6 @@ module Rails
         app.config.after_initialize do
           Rails::Container.emit_diagnostics
         end
-      end
-
-      # Two ways to learn that this process is serving, so on_service_stop hooks
-      # never fire in a rake task, a console or a one-off script. The railtie
-      # block runs from config.ru's Rails.application.load_server -- at server
-      # boot, with no window; the middleware catches the first request, as the
-      # safety net for an app whose config.ru predates load_server. Declared
-      # here rather than in Engine because Engine initializers run once per
-      # engine, which would insert the middleware repeatedly.
-      initializer :setup_container_serving_marker, before: :build_middleware_stack do |app|
-        require "rails/container"
-
-        app.server { Rails::Container::GracefulShutdown.serving!(by: "server_block") }
-        app.middleware.unshift Rails::Container::GracefulShutdown::ServingMarker
       end
 
       initializer :setup_main_autoloader do

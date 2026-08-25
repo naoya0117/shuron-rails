@@ -1,9 +1,7 @@
 # frozen_string_literal: true
 
 require "abstract_unit"
-require "minitest/mock"
 require "stringio"
-require "tmpdir"
 require "rails/container"
 
 class Rails::ContainerLayerTest < ActiveSupport::TestCase
@@ -198,30 +196,6 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
     assert_nil Rails::Container.self_awareness_problem
   end
 
-  # serving_declaration: the config.ru gap that delays recognising a server ---
-
-  test "serving_declaration_problem stays quiet when no service hooks are registered" do
-    with_rackup("run Rails.application\n") do
-      assert_nil Rails::Container.serving_declaration_problem
-    end
-  end
-
-  test "serving_declaration_problem warns when config.ru does not call load_server" do
-    Rails::Container::GracefulShutdown.on_service_stop { :business }
-
-    with_rackup("run Rails.application\n") do
-      assert_match(/load_server/, Rails::Container.serving_declaration_problem)
-    end
-  end
-
-  test "serving_declaration_problem is satisfied once config.ru calls load_server" do
-    Rails::Container::GracefulShutdown.on_service_stop { :business }
-
-    with_rackup("run Rails.application\nRails.application.load_server\n") do
-      assert_nil Rails::Container.serving_declaration_problem
-    end
-  end
-
   test "process_containment_problem warns when only the effective uid is root" do
     ENV["CONTAINER_PLATFORM"] = "kubernetes"
     Rails::Container::Privilege.syscalls = FakeSyscalls.new(start_uid: 1000, start_euid: 0)
@@ -230,13 +204,6 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
   end
 
   private
-    def with_rackup(contents)
-      Dir.mktmpdir do |dir|
-        File.write(File.join(dir, "config.ru"), contents)
-        Rails.stub(:root, Pathname.new(dir)) { yield }
-      end
-    end
-
     # The emitted lines minus what varies per run (prefix, pid, duration).
     def event_summaries
       Rails::Container::Events.recorded.map do |line|
