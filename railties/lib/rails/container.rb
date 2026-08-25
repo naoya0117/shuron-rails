@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails/container/config_loader"
+require "rails/container/events"
 require "rails/container/graceful_shutdown"
 require "rails/container/privilege"
 
@@ -106,11 +107,18 @@ module Rails
       # Runs each init step once, in order. Fails fast: a raising step aborts
       # initialization, and the completion flag is only set after success so a
       # retry re-runs the (idempotent) steps.
+      #
+      # Each step and the completion are recorded as events, so that "the steps
+      # ran before traffic" is observable from outside the process rather than
+      # inferred from the fact that they were declared.
       def run_init!
         return if @init_ran
 
-        init_steps.each { |step| step.block.call }
+        init_steps.each do |step|
+          Events.timed("init.step", name: step.name) { step.block.call }
+        end
         @init_ran = true
+        Events.emit("init.done", steps: init_steps.size)
       end
 
       # --- Self Awareness -------------------------------------------------

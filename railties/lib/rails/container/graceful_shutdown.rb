@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+# require_relative, not an absolute require: this file is also loaded directly
+# by its test, outside the bundle that puts railties/lib on the load path.
+require_relative "events"
+
 module Rails
   module Container
     # Managed Lifecycle (terminal): runs application cleanup when the process
@@ -28,15 +32,24 @@ module Rails
           @hooks ||= []
         end
 
+        # Bracketed by events so a verification script can tell "the layer never
+        # heard SIGTERM" from "the layer ran and a hook hung" -- see
+        # Rails::Container::Events. The pair is emitted even with no hooks
+        # registered, since "the framework fired and had nothing to do" is
+        # itself the thing under test.
         def run_hooks
           return if @ran
 
           @ran = true
-          hooks.each do |hook|
-            hook.call
+          Events.emit("shutdown.begin", hooks: hooks.size)
+
+          hooks.each_with_index do |hook, index|
+            Events.timed("shutdown.hook", index: index) { hook.call }
           rescue StandardError => e
             warn "[GracefulShutdown] #{e.class}: #{e.message}"
           end
+
+          Events.emit("shutdown.done", hooks: hooks.size)
         end
 
         # Test helper. Clears registered hooks and re-arms install!/run_hooks.

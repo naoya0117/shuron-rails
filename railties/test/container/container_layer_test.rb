@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "abstract_unit"
+require "stringio"
 require "rails/container"
 
 class Rails::ContainerLayerTest < ActiveSupport::TestCase
@@ -26,6 +27,8 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
     Rails::Container.reset_init
     Rails::Container::GracefulShutdown.reset!
     Rails::Container::Privilege.reset!
+    Rails::Container::Events.reset!
+    Rails::Container::Events.output = StringIO.new
     @orig_config = Rails.application.config.x.container
     Rails.application.config.x.container = { diagnostics: {} }
   end
@@ -37,6 +40,7 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
     Rails::Container.reset_init
     Rails::Container::GracefulShutdown.reset!
     Rails::Container::Privilege.reset!
+    Rails::Container::Events.reset!
     Rails.application.config.x.container = @orig_config
   end
 
@@ -97,6 +101,26 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
     Rails::Container.run_init!
     Rails::Container.run_init!
     assert_equal [:a, :b], order
+  end
+
+  # The evidence a verification script waits for before sending traffic.
+  test "run_init! records each step and the completion as events" do
+    Rails::Container.init_step(:db_migrate) { :ok }
+    Rails::Container.init_step(:seed) { :ok }
+
+    Rails::Container.run_init!
+
+    assert_equal ["init.step name=db_migrate status=ok", "init.step name=seed status=ok",
+                  "init.done steps=2"],
+      event_summaries
+  end
+
+  test "a failing step is recorded as an error and no completion event follows" do
+    Rails::Container.init_step(:boom) { raise "fail" }
+
+    assert_raises(RuntimeError) { Rails::Container.run_init! }
+
+    assert_equal ["init.step name=boom status=error"], event_summaries
   end
 
   test "run_init! re-raises and does not mark complete on failure" do
@@ -178,4 +202,14 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
 
     assert Rails::Container.process_containment_problem
   end
+
+  private
+    # The emitted lines minus what varies per run (prefix, pid, duration).
+    def event_summaries
+      Rails::Container::Events.recorded.map do |line|
+        line.sub(Rails::Container::Events::PREFIX, "")
+            .sub(" pid=#{Process.pid}", "")
+            .sub(/ duration_ms=\d+/, "")
+      end
+    end
 end

@@ -56,14 +56,13 @@ jobs:
 
       - name: Run Container layer unit tests
         working-directory: railties
+        # Globbed, not listed: a fixed list silently skips any test file added
+        # later (privilege_test.rb went unrun that way for two weeks).
         run: |
           set -e
           for f in \
-            test/container/container_layer_test.rb \
-            test/container/graceful_shutdown_test.rb \
-            test/container/conformance_test.rb \
-            test/kubernetes/manifest_annotator_test.rb \
-            test/kubernetes/override_builder_test.rb \
+            test/container/*_test.rb \
+            test/kubernetes/*_test.rb \
             test/rails_health_controller_test.rb
           do
             echo "::group::$f"

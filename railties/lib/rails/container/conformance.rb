@@ -22,7 +22,12 @@ module Rails
     #
     # Behavioral checks that require a real orchestrator (readiness gating a
     # Service, a real SIGTERM drain, migration idempotency against a live DB)
-    # are out of scope here and belong to Layer 3.
+    # are out of scope here and belong to Layer 3. They stay out of scope
+    # deliberately: this runs in its own short-lived process, so it can only
+    # ever inspect a registry, never watch the server that will handle the
+    # signal. What the server actually did is recorded by
+    # Rails::Container::Events and asserted from outside the process --
+    # forks-docker/verify-lifecycle.sh.
     module Conformance
       Result = Struct.new(:pattern, :status, :detail, keyword_init: true)
 
@@ -70,7 +75,7 @@ module Rails
             timing = Container.config[:graceful_shutdown]
             if hooks.positive?
               Result.new(pattern: "Managed Lifecycle", status: :pass,
-                detail: "#{hooks} shutdown hook(s) registered#{timing ? "; timing #{timing.inspect}" : ''} (real SIGTERM drain at Layer 3)")
+                detail: "#{hooks} shutdown hook(s) registered#{timing ? "; timing #{timing.inspect}" : ''} (real SIGTERM drain: verify-lifecycle.sh)")
             else
               Result.new(pattern: "Managed Lifecycle", status: :na,
                 detail: "no on_shutdown hooks registered")
@@ -83,7 +88,7 @@ module Rails
             steps = Container.init_steps.map(&:name)
             if steps.any?
               Result.new(pattern: "Init Container", status: :pass,
-                detail: "steps: #{steps.join(', ')} (idempotency verified at Layer 3)")
+                detail: "steps: #{steps.join(', ')} (actual run: verify-lifecycle.sh)")
             else
               Result.new(pattern: "Init Container", status: :na, detail: "no init steps registered")
             end
