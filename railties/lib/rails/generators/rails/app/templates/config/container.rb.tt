@@ -36,11 +36,19 @@ Rails.application.configure do
   }
 end
 
-# Register graceful shutdown hooks (optional). Hooks run when SIGTERM is received,
-# before Puma starts draining requests.
+# Register graceful shutdown hooks (optional). Hooks run as the process
+# terminates, which covers SIGTERM from the orchestrator.
+#
+# Release resources this process holds -- nothing else. Hooks must be idempotent
+# and free of business side effects, because at_exit fires in *every* Ruby
+# process: a container that runs `rails db:prepare` and `rails container:init`
+# before starting its server runs them three times, twice while the app is
+# still booting. Work that must happen exactly once when the Pod stops belongs
+# in the preStop hook (generated from graceful_shutdown below); business logic
+# belongs in an init step, which runs once, before traffic, idempotently.
 #
 # Rails::Container::GracefulShutdown.on_shutdown do
-#   Sidekiq.shutdown if defined?(Sidekiq)
+#   ActiveRecord::Base.connection_handler.clear_all_connections!
 # end
 
 # Process Containment. The container layer warns whenever the process runs as
