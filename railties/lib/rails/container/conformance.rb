@@ -70,15 +70,19 @@ module Rails
           end
 
           # Managed Lifecycle: at least one graceful-shutdown hook registered.
+          # Counts both kinds, because they answer different questions: resource
+          # hooks run everywhere, service hooks only in a serving process.
           def managed_lifecycle
             hooks = GracefulShutdown.hooks.size
+            service = GracefulShutdown.service_hooks.size
             timing = Container.config[:graceful_shutdown]
-            if hooks.positive?
+            if (hooks + service).positive?
               Result.new(pattern: "Managed Lifecycle", status: :pass,
-                detail: "#{hooks} shutdown hook(s) registered#{timing ? "; timing #{timing.inspect}" : ''} (real SIGTERM drain: verify-lifecycle.sh)")
+                detail: "#{hooks} resource + #{service} service hook(s) registered" \
+                  "#{timing ? "; timing #{timing.inspect}" : ''} (real SIGTERM drain: verify-lifecycle.sh)")
             else
               Result.new(pattern: "Managed Lifecycle", status: :na,
-                detail: "no on_shutdown hooks registered")
+                detail: "no on_shutdown / on_service_stop hooks registered")
             end
           end
 

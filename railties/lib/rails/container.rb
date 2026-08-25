@@ -177,6 +177,31 @@ module Rails
           "so the generated securityContext enforces it"
       end
 
+      # Warns when config.ru does not call Rails.application.load_server.
+      #
+      # That call is what fires the +server+ railtie block, which is how the
+      # layer learns at boot -- before any request -- that this process serves.
+      # Apps generated before the line was added to the Rails template do not
+      # have it (Mastodon is one). Without it the process only looks like a
+      # server once its first request arrives, so a Pod stopped before then runs
+      # no on_service_stop hooks. The middleware makes that window small rather
+      # than closing it, which is exactly the kind of gap the layer should say
+      # out loud instead of leaving to be discovered in production.
+      def serving_declaration_problem
+        return if GracefulShutdown.service_hooks.empty?
+
+        rackup = Rails.root.join("config.ru")
+        return unless File.exist?(rackup)
+        return if File.read(rackup).include?("load_server")
+
+        "config.ru does not call Rails.application.load_server, so this process " \
+          "is only recognised as serving once its first request arrives; " \
+          "on_service_stop hooks would be skipped for a Pod stopped before then. " \
+          "Add `Rails.application.load_server` to config.ru"
+      rescue StandardError
+        nil
+      end
+
       # Warns when the Downward API identity was not injected.
       #
       # Kubernetes-only on purpose, and the exception to the rule above: what is

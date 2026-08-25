@@ -58,7 +58,9 @@ class GracefulShutdownTest < Minitest::Test
     Rails::Container::GracefulShutdown.on_shutdown { :ok }
     Rails::Container::GracefulShutdown.run_hooks
 
-    assert_equal ["shutdown.begin hooks=1", "shutdown.hook index=0 status=ok", "shutdown.done hooks=1"],
+    assert_equal ["shutdown.begin serving=false hooks=1 service_hooks=0",
+                  "shutdown.hook kind=resource index=0 status=ok",
+                  "shutdown.done serving=false hooks=1"],
       event_summaries
   end
 
@@ -68,7 +70,9 @@ class GracefulShutdownTest < Minitest::Test
   def test_run_hooks_emits_the_bracket_even_with_no_hooks
     Rails::Container::GracefulShutdown.run_hooks
 
-    assert_equal ["shutdown.begin hooks=0", "shutdown.done hooks=0"], event_summaries
+    assert_equal ["shutdown.begin serving=false hooks=0 service_hooks=0",
+                  "shutdown.done serving=false hooks=0"],
+      event_summaries
   end
 
   def test_a_failing_hook_is_reported_and_the_run_still_completes
@@ -83,9 +87,74 @@ class GracefulShutdownTest < Minitest::Test
       $stderr = original_stderr
     end
 
-    assert_equal ["shutdown.begin hooks=2", "shutdown.hook index=0 status=error",
-                  "shutdown.hook index=1 status=ok", "shutdown.done hooks=2"],
+    assert_equal ["shutdown.begin serving=false hooks=2 service_hooks=0",
+                  "shutdown.hook kind=resource index=0 status=error",
+                  "shutdown.hook kind=resource index=1 status=ok",
+                  "shutdown.done serving=false hooks=2"],
       event_summaries
+  end
+
+  # --- on_service_stop: business logic must not fire in a boot process ------
+
+  def test_service_hooks_are_skipped_when_the_process_never_served
+    ran = false
+    Rails::Container::GracefulShutdown.on_service_stop { ran = true }
+
+    Rails::Container::GracefulShutdown.run_hooks
+
+    refute ran, "business hooks must not run in a process that was never serving"
+    assert_equal ["shutdown.begin serving=false hooks=0 service_hooks=1",
+                  "shutdown.done serving=false hooks=0"],
+      event_summaries
+  end
+
+  def test_service_hooks_run_once_the_process_is_marked_serving
+    ran = false
+    Rails::Container::GracefulShutdown.on_service_stop { ran = true }
+    Rails::Container::GracefulShutdown.serving!(by: "server_block")
+
+    Rails::Container::GracefulShutdown.run_hooks
+
+    assert ran
+    assert_equal ["shutdown.armed by=server_block",
+                  "shutdown.begin serving=true hooks=0 service_hooks=1",
+                  "shutdown.hook kind=service index=0 status=ok",
+                  "shutdown.done serving=true hooks=0"],
+      event_summaries
+  end
+
+  # Resource release is unconditional: closing your own connections on the way
+  # out is correct in a rake task too.
+  def test_resource_hooks_run_even_when_not_serving
+    ran = false
+    Rails::Container::GracefulShutdown.on_shutdown { ran = true }
+
+    Rails::Container::GracefulShutdown.run_hooks
+
+    assert ran
+    assert_includes event_summaries, "shutdown.hook kind=resource index=0 status=ok"
+  end
+
+  def test_serving_is_recorded_once_and_the_first_caller_wins
+    Rails::Container::GracefulShutdown.serving!(by: "server_block")
+    Rails::Container::GracefulShutdown.serving!(by: "request")
+
+    assert_equal ["shutdown.armed by=server_block"], event_summaries
+  end
+
+  def test_the_middleware_marks_the_process_on_the_first_request
+    inner = ->(_env) { [200, {}, ["ok"]] }
+    middleware = Rails::Container::GracefulShutdown::ServingMarker.new(inner)
+
+    refute Rails::Container::GracefulShutdown.serving?
+    middleware.call({})
+
+    assert Rails::Container::GracefulShutdown.serving?
+    assert_equal ["shutdown.armed by=request"], event_summaries
+  end
+
+  def test_on_service_stop_requires_a_block
+    assert_raises(ArgumentError) { Rails::Container::GracefulShutdown.on_service_stop }
   end
 
   private

@@ -9,52 +9,109 @@ module Rails
     # Managed Lifecycle (terminal): runs application cleanup when the process
     # terminates. Hooks run once, in registration order.
     #
-    # == The contract: release resources, do not run business logic
+    # == Two kinds of hook, because at_exit fires in every process
     #
-    # A hook must only release what *this process* holds, must be idempotent,
-    # and must have no business side effects. That is not a style preference --
-    # it is forced by where the hooks run.
-    #
-    # +at_exit+ fires in *every* Ruby process, not just the server: a container
+    # +at_exit+ is the only mechanism that covers every process kind (Puma and
+    # Pitchfork masters and workers, Sidekiq, CLI) with one registration -- but
+    # it also fires in processes that were never serving anything. A container
     # that runs +rails db:prepare+ and +rails container:init+ before +exec+ing
-    # its server executes the hooks three times, twice of them while the app is
-    # still starting up. A hook that marked the node offline or flushed a
-    # pending queue would therefore fire during boot, repeatedly, and could
-    # undo what initialization had just done.
+    # its server passes through at_exit three times, twice while the app is
+    # still booting. So the layer separates the two things an application wants
+    # to do on the way out:
     #
-    # The layer cannot narrow this by detecting "am I the server", and that was
-    # established by measurement, not assumption:
+    # [+on_shutdown+]
+    #   Releases resources *this process* holds. Runs in every process, because
+    #   closing your own connections as you exit is correct anywhere. Must be
+    #   idempotent and free of business side effects.
     #
-    # * +config.ru+'s Rails.application.load_server (which drives
-    #   Railtie.server) is missing from apps generated before it was added --
-    #   Mastodon is one, so its Puma would be classified as "not a server".
-    # * "the server is PID 1" is false whenever the image has an ENTRYPOINT:
-    #   with tini, PID 1 is tini and the server is some other pid.
-    # * a TERM trap set here is replaced by the server's own, installed after
-    #   boot, so it never sees the signal -- and a server that handles TERM and
-    #   exits cleanly leaves $! as SystemExit, indistinguishable from a rake
-    #   task finishing.
+    # [+on_service_stop+]
+    #   The application is being stopped: business work that must not be left
+    #   half-done. Runs *only* in a process that was actually serving, so it
+    #   cannot fire while the app is still booting. This is where logic that
+    #   would otherwise live in the Model layer belongs.
     #
-    # Since the process cannot be identified reliably, the contract has to be
-    # one that is safe in any process. Work that must happen exactly once when
-    # the *Pod* stops belongs in a +preStop+ hook -- generated from the
-    # +graceful_shutdown+ settings -- where the platform controls the timing.
-    # Business logic that belongs to the container layer goes in an init step
-    # (Rails::Container.init_step), which is specified to run once, before
-    # traffic, and idempotently.
+    # Without the split, a hook like <tt>Order.cancel_processing!</tt> would run
+    # when +db:prepare+ exited -- cancelling orders that *other, healthy* Pods
+    # were in the middle of processing.
+    #
+    # == How "was this process serving?" is decided
+    #
+    # By positive evidence only, never by guessing what kind of process this is.
+    # Anything unrecognised is treated as not serving, so a console, a runner or
+    # a one-off script can never trigger business hooks. Three sources arm it:
+    #
+    # 1. The +server+ railtie block, which +config.ru+ runs via
+    #    <tt>Rails.application.load_server</tt>. Fires at server boot, before
+    #    any request, so there is no window.
+    # 2. This module's middleware, on the first request it handles. The safety
+    #    net for an app whose +config.ru+ predates +load_server+ (Mastodon is
+    #    one); the +serving_declaration+ diagnostic reports that gap, because
+    #    until the first request arrives such a process looks non-serving.
+    # 3. An explicit +serving!+, for a process that serves something other than
+    #    HTTP. A Sidekiq worker declares itself from config/container.rb:
+    #
+    #      Sidekiq.configure_server do
+    #        Rails::Container::GracefulShutdown.serving!
+    #      end
+    #
+    # The alternatives were measured and rejected: "the server is PID 1" is
+    # false for any image with an ENTRYPOINT (with tini, PID 1 is tini), the
+    # middleware *stack* is built even for rake tasks so its construction says
+    # nothing, and a TERM trap installed here is replaced by the server's own --
+    # while a server that handles TERM and exits cleanly leaves +$!+ as
+    # SystemExit, indistinguishable from a rake task finishing.
     #
     # Ordering caveat: install! runs after the app's own initializers, so these
     # hooks are registered last and therefore run *first* (at_exit is
     # last-in-first-out). An app +at_exit+ that still needs the database must
     # not rely on the connection being open.
     module GracefulShutdown
+      # Rack middleware that arms the service hooks on the first request. Only a
+      # real server ever calls it, which is the point; a rake task builds the
+      # middleware stack but never runs through it.
+      class ServingMarker
+        def initialize(app)
+          @app = app
+        end
+
+        def call(env)
+          GracefulShutdown.serving!(by: "request")
+          @app.call(env)
+        end
+      end
+
       class << self
-        # Registers cleanup to run as the process terminates. See the contract
-        # above: release resources only, idempotent, no business side effects.
+        # Registers cleanup for resources this process holds. Runs in every
+        # process, so it must be idempotent and must not carry business side
+        # effects -- use +on_service_stop+ for those.
         def on_shutdown(&block)
           raise ArgumentError, "on_shutdown requires a block" unless block
 
           hooks << block
+        end
+
+        # Registers work to run when the application is being stopped. Runs only
+        # in a process that was actually serving (see +serving!+), so it is safe
+        # to put business logic here.
+        def on_service_stop(&block)
+          raise ArgumentError, "on_service_stop requires a block" unless block
+
+          service_hooks << block
+        end
+
+        # Records that this process is serving, which is what allows the
+        # +on_service_stop+ hooks to run. Idempotent; the first caller wins so
+        # the event reports how it was discovered.
+        def serving!(by: "explicit")
+          return true if @serving
+
+          @serving = true
+          Events.emit("shutdown.armed", by: by)
+          true
+        end
+
+        def serving?
+          !!@serving
         end
 
         # Runs the registered hooks on normal process exit. This covers SIGTERM
@@ -73,32 +130,48 @@ module Rails
           @hooks ||= []
         end
 
+        def service_hooks
+          @service_hooks ||= []
+        end
+
         # Bracketed by events so a verification script can tell "the layer never
-        # heard SIGTERM" from "the layer ran and a hook hung" -- see
-        # Rails::Container::Events. The pair is emitted even with no hooks
-        # registered, since "the framework fired and had nothing to do" is
-        # itself the thing under test.
+        # heard SIGTERM" from "the layer ran and a hook hung". The pair is
+        # emitted even with no hooks registered, since "the framework fired and
+        # had nothing to do" is itself the thing under test. +serving+ says
+        # whether the service hooks were eligible, so a skipped business hook is
+        # never indistinguishable from a missing one.
         def run_hooks
           return if @ran
 
           @ran = true
-          Events.emit("shutdown.begin", hooks: hooks.size)
+          Events.emit("shutdown.begin", serving: serving?,
+            hooks: hooks.size, service_hooks: service_hooks.size)
 
-          hooks.each_with_index do |hook, index|
-            Events.timed("shutdown.hook", index: index) { hook.call }
-          rescue StandardError => e
-            warn "[GracefulShutdown] #{e.class}: #{e.message}"
-          end
+          run_each(hooks, "resource")
+          run_each(service_hooks, "service") if serving?
 
-          Events.emit("shutdown.done", hooks: hooks.size)
+          Events.emit("shutdown.done", serving: serving?, hooks: hooks.size)
         end
 
         # Test helper. Clears registered hooks and re-arms install!/run_hooks.
         def reset!
           @hooks = []
+          @service_hooks = []
           @ran = false
           @installed = false
+          @serving = false
         end
+
+        private
+          # A failing hook is reported and the run continues: cleanup left
+          # undone is better than cleanup abandoned halfway.
+          def run_each(list, kind)
+            list.each_with_index do |hook, index|
+              Events.timed("shutdown.hook", kind: kind, index: index) { hook.call }
+            rescue StandardError => e
+              warn "[GracefulShutdown] #{e.class}: #{e.message}"
+            end
+          end
       end
     end
   end
