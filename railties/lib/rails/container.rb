@@ -139,15 +139,23 @@ module Rails
       # Off Kubernetes (local/Docker) every field is nil -- the Downward API
       # only injects these on a cluster -- so the platform difference is
       # absorbed and unrelated local env is not surfaced.
+      #
+      # An empty variable is normalised to nil, not carried through as "". A
+      # fieldRef can resolve to an empty string, and every consumer here asks
+      # the same question -- "did the Downward API actually arrive?" -- so they
+      # must all get the same answer. Without the normalisation the truthiness
+      # checks (this struct's readers) and the emptiness checks
+      # (self_awareness_problem) disagree, and one boot reports both
+      # identity=injected and a "not fully injected" warning.
       def self_info
         return SelfInfo.new unless platform == :kubernetes
 
         SelfInfo.new(
-          pod_name: ENV["POD_NAME"],
-          namespace: ENV["POD_NAMESPACE"],
-          node_name: ENV["NODE_NAME"],
-          pod_ip: ENV["POD_IP"],
-          service_account: ENV["POD_SERVICE_ACCOUNT"]
+          pod_name: env_value("POD_NAME"),
+          namespace: env_value("POD_NAMESPACE"),
+          node_name: env_value("NODE_NAME"),
+          pod_ip: env_value("POD_IP"),
+          service_account: env_value("POD_SERVICE_ACCOUNT")
         )
       end
 
@@ -245,6 +253,13 @@ module Rails
       end
 
       private
+        # nil for both an unset and an empty variable, so "present" means the
+        # same thing to every caller.
+        def env_value(name)
+          value = ENV[name]
+          value.nil? || value.empty? ? nil : value
+        end
+
         def run_checks
           checks.filter_map do |check|
             message = check.block.call

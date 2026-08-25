@@ -13,7 +13,7 @@ Rails.application.configure do
     resources: {
       # CPU: request のみ設定。limits は設定しない（throttling 防止・Burstable QoS）
       cpu: { request: "100m" },
-      # Memory: request == limit に設定（Guaranteed QoS でメモリ不足時の強制停止を防ぐ）
+      # Memory: request == limit に設定（圧縮不可なので割り当てを確定させる）
       memory: { request: "256Mi", limit: "256Mi" }
     },
     graceful_shutdown: {

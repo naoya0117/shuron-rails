@@ -133,6 +133,21 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
     assert ran
   end
 
+  # An empty fieldRef must read the same way everywhere. Before this was
+  # normalised, one boot reported identity=injected *and* a "not fully injected"
+  # warning, because the struct readers tested truthiness and the diagnostic
+  # tested emptiness.
+  test "an empty Downward API variable is treated as absent by every consumer" do
+    ENV["CONTAINER_PLATFORM"] = "kubernetes"
+    ENV["POD_NAME"] = ""
+    ENV["POD_NAMESPACE"] = "default"
+    ENV["NODE_NAME"] = "node-1"
+
+    assert_nil Rails::Container.self_info.pod_name
+    assert_equal "absent", Rails::Container.boot_summary[:identity]
+    assert_match(/POD_NAME/, Rails::Container.self_awareness_problem)
+  end
+
   # Boot summary -----------------------------------------------------------
 
   test "boot_summary records the resolved state of every pattern" do

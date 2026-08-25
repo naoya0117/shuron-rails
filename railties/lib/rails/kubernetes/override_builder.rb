@@ -7,8 +7,11 @@ module Rails
 
       # config/container.rb の resources: ハッシュを受け取り、
       # Docker Compose の deploy.resources 構造を返す。
-      # CPU limits は Burstable QoS のため生成しない。
-      # memory.limit 省略時は request と同値にして Guaranteed QoS を維持する。
+      # CPU の limit は生成しない(圧縮可能なので絞られるだけ。書籍の推奨)。
+      # memory は圧縮不可で超過すると強制停止されるため、limit 省略時は request と
+      # 同値にして割り当てを確定させる。
+      # ※ CPU に limit が無いので Pod の QoS クラスは Burstable になる。
+      #   Guaranteed には全コンテナの cpu/memory 双方で request==limit が必要。
       def build_resource_deploy(resources_config)
         return nil if resources_config.nil?
 
