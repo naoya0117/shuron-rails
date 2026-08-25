@@ -54,12 +54,35 @@ module Rails
     #        Rails::Container::GracefulShutdown.serving!
     #      end
     #
-    # The alternatives were measured and rejected: "the server is PID 1" is
-    # false for any image with an ENTRYPOINT (with tini, PID 1 is tini), the
-    # middleware *stack* is built even for rake tasks so its construction says
-    # nothing, and a TERM trap installed here is replaced by the server's own --
-    # while a server that handles TERM and exits cleanly leaves +$!+ as
-    # SystemExit, indistinguishable from a rake task finishing.
+    # Two alternatives were measured and rejected outright: "the server is PID 1"
+    # is false for any image with an ENTRYPOINT (with tini, PID 1 is tini), and
+    # the middleware *stack* is built even for rake tasks, so its construction
+    # says nothing (only a request passing through it does).
+    #
+    # A third alternative -- reading +$!+ inside at_exit to see whether a signal
+    # ended the process -- turns out to work in more cases than this comment
+    # first claimed, and the correction matters, so the measured matrix is:
+    #
+    #   Puma single mode           $! == SignalException SIGTERM
+    #   Puma cluster master        $! == SignalException SIGTERM
+    #   Puma cluster worker        $! == nil
+    #   Sidekiq                    $! == SystemExit
+    #   Pitchfork                  $! == SystemExit
+    #   rake task / clean exit     $! == nil
+    #
+    # Puma raises deliberately: +raise_exception_on_sigterm+ defaults to true
+    # (puma configuration.rb) and its TERM trap ends in
+    # <tt>raise(SignalException, "SIGTERM")</tt>, so a Puma web process *can*
+    # identify the signal. Nor is a trap installed here always lost: in Puma
+    # single mode setup_signals runs *before* the app boots, so an app trap
+    # replaces Puma's and can chain to it. Both of these are false only for
+    # cluster workers, Sidekiq and Pitchfork -- exactly where +$!+ collapses to
+    # nil or SystemExit and becomes indistinguishable from a clean exit.
+    #
+    # So +$!+ is a sharper signal than "did this process serve", but it is not a
+    # complete one, and it arrives too late to be the primary mechanism. The
+    # faithful route is the platform's own preStop hook, which the layer already
+    # generates -- see Rails::Kubernetes::ManifestAnnotator.
     #
     # Ordering caveat: install! runs after the app's own initializers, so these
     # hooks are registered last and therefore run *first* (at_exit is
