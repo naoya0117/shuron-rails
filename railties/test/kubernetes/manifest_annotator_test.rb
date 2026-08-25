@@ -39,6 +39,11 @@ class ManifestAnnotatorTest < Minitest::Test
     @file.unlink
   end
 
+  # FIXTURE を書き換えた版を同じ一時ファイルへ流し込む
+  def rewrite(manifest)
+    File.write(@file.path, YAML.dump(manifest))
+  end
+
   def test_inject_pre_stop_adds_lifecycle_to_container
     Rails::Kubernetes::ManifestAnnotator.annotate!(@file.path, pre_stop_delay: "15s")
     manifest = YAML.load_file(@file.path)
@@ -144,6 +149,113 @@ class ManifestAnnotatorTest < Minitest::Test
     assert_includes File.read(@file.path), "# shuron-rails Kubernetes layer (Process Containment - injected after kompose)"
   end
 
+  # --- A-2: seccompProfile ---------------------------------------------------
+
+  def test_injects_seccomp_profile_as_a_secure_default
+    Rails::Kubernetes::ManifestAnnotator.annotate!(
+      @file.path, pre_stop_delay: "15s", security: { seccomp_profile: "RuntimeDefault" })
+
+    sc = YAML.load_file(@file.path).dig("spec", "template", "spec", "containers", 0, "securityContext")
+    assert_equal({ "type" => "RuntimeDefault" }, sc["seccompProfile"])
+  end
+
+  def test_seccomp_profile_does_not_clobber_an_existing_value
+    manifest = Marshal.load(Marshal.dump(FIXTURE))
+    manifest["spec"]["template"]["spec"]["containers"][0]["securityContext"] =
+      { "seccompProfile" => { "type" => "Localhost", "localhostProfile" => "p.json" } }
+    rewrite(manifest)
+
+    Rails::Kubernetes::ManifestAnnotator.annotate!(
+      @file.path, pre_stop_delay: "15s", security: { seccomp_profile: "RuntimeDefault" })
+
+    sc = YAML.load_file(@file.path).dig("spec", "template", "spec", "containers", 0, "securityContext")
+    assert_equal "Localhost", sc.dig("seccompProfile", "type")
+  end
+
+  # --- A-1: probe headers ---------------------------------------------------
+
+  # Without these the probe passes on a 301 and the readiness check never runs.
+  def test_injects_probe_headers_into_every_http_get_probe
+    # FIXTURE は liveness / readiness の httpGet を既に持っている
+    Rails::Kubernetes::ManifestAnnotator.annotate!(
+      @file.path, pre_stop_delay: "15s",
+      probe_headers: { "X-Forwarded-Proto" => "https", "Host" => "app.example.com" })
+
+    c = YAML.load_file(@file.path).dig("spec", "template", "spec", "containers", 0)
+    %w[livenessProbe readinessProbe].each do |probe|
+      headers = c.dig(probe, "httpGet", "httpHeaders")
+      assert_equal [{ "name" => "X-Forwarded-Proto", "value" => "https" },
+                    { "name" => "Host", "value" => "app.example.com" }], headers
+    end
+  end
+
+  def test_probe_headers_are_left_alone_when_already_present
+    manifest = Marshal.load(Marshal.dump(FIXTURE))
+    manifest["spec"]["template"]["spec"]["containers"][0]["livenessProbe"] =
+      { "httpGet" => { "path" => "/live", "httpHeaders" => [{ "name" => "Host", "value" => "kept" }] } }
+    rewrite(manifest)
+
+    Rails::Kubernetes::ManifestAnnotator.annotate!(
+      @file.path, pre_stop_delay: "15s", probe_headers: { "Host" => "replaced" })
+
+    headers = YAML.load_file(@file.path).dig("spec", "template", "spec", "containers", 0,
+      "livenessProbe", "httpGet", "httpHeaders")
+    assert_equal [{ "name" => "Host", "value" => "kept" }], headers
+  end
+
+  def test_no_probe_headers_argument_leaves_probes_untouched
+    Rails::Kubernetes::ManifestAnnotator.annotate!(@file.path, pre_stop_delay: "15s")
+
+    refute YAML.load_file(@file.path).dig("spec", "template", "spec", "containers", 0,
+      "livenessProbe", "httpGet").key?("httpHeaders")
+  end
+
+  # --- A-3: initContainers -------------------------------------------------
+
+  # resources especially: an init container without them makes the Pod's
+  # effective limit for that resource unbounded, voiding the declared limit.
+  def test_injects_an_init_container_copying_the_app_container_fields
+    manifest = Marshal.load(Marshal.dump(FIXTURE))
+    container = manifest["spec"]["template"]["spec"]["containers"][0]
+    container["image"] = "example/app:tag"
+    container["imagePullPolicy"] = "Always"
+    container["env"]       = [{ "name" => "POD_NAME", "valueFrom" => { "fieldRef" => { "fieldPath" => "metadata.name" } } }]
+    container["envFrom"]   = [{ "configMapRef" => { "name" => "app-env" } }]
+    container["resources"] = { "requests" => { "memory" => "1Gi" }, "limits" => { "memory" => "1Gi" } }
+    container["securityContext"] = { "allowPrivilegeEscalation" => false }
+    rewrite(manifest)
+
+    Rails::Kubernetes::ManifestAnnotator.annotate!(
+      @file.path, pre_stop_delay: "15s", init_command: ["bin/rails", "container:init"])
+
+    init = YAML.load_file(@file.path).dig("spec", "template", "spec", "initContainers")
+    assert_equal 1, init.size
+    entry = init.first
+    assert_equal "container-init", entry["name"]
+    assert_equal ["bin/rails", "container:init"], entry["command"]
+    assert_equal container["image"], entry["image"]
+    assert_equal "Always", entry["imagePullPolicy"]
+    assert_equal container["env"], entry["env"], "Downward API must reach the init container too"
+    assert_equal container["envFrom"], entry["envFrom"]
+    assert_equal container["resources"], entry["resources"], "omitting resources unbounds the Pod limit"
+    assert_equal container["securityContext"], entry["securityContext"]
+  end
+
+  def test_init_container_is_not_added_twice
+    2.times do
+      Rails::Kubernetes::ManifestAnnotator.annotate!(
+        @file.path, pre_stop_delay: "15s", init_command: ["bin/rails", "container:init"])
+    end
+
+    assert_equal 1, YAML.load_file(@file.path).dig("spec", "template", "spec", "initContainers").size
+  end
+
+  def test_no_init_command_adds_no_init_container
+    Rails::Kubernetes::ManifestAnnotator.annotate!(@file.path, pre_stop_delay: "15s")
+
+    assert_nil YAML.load_file(@file.path).dig("spec", "template", "spec", "initContainers")
+  end
+
   private
     def container
       YAML.load_file(@file.path).dig("spec", "template", "spec", "containers", 0)
@@ -152,4 +264,5 @@ class ManifestAnnotatorTest < Minitest::Test
     def container_security_context
       container.fetch("securityContext")
     end
+
 end

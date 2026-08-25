@@ -90,11 +90,55 @@ namespace :kubernetes do
     graceful = settings[:graceful_shutdown] || settings["graceful_shutdown"] || {}
     pre_stop_delay = graceful[:pre_stop_delay] || graceful["pre_stop_delay"] || "15s"
     security = resolve_process_containment(settings)
+    probe_headers = resolve_probe_headers
+    init_command = Rails::Container.init_steps.any? ? resolve_init_command : nil
 
     Dir.glob(File.join(output_dir, "*-deployment.yaml")).each do |path|
-      Rails::Kubernetes::ManifestAnnotator.annotate!(path, pre_stop_delay: pre_stop_delay, security: security)
+      Rails::Kubernetes::ManifestAnnotator.annotate!(
+        path,
+        pre_stop_delay: pre_stop_delay,
+        security: security,
+        probe_headers: probe_headers,
+        init_command: init_command
+      )
       puts "Annotated #{path}"
     end
+  end
+
+  # Headers the generated probes need in order to reach the health action.
+  #
+  # Derived from the app rather than declared, and deliberately the same
+  # derivation Rails::Container::Conformance uses for its in-process request --
+  # otherwise Layer 1 and the manifest disagree about what a healthy probe looks
+  # like, which is exactly what happened: conformance was fixed in 2026-07 while
+  # the manifests kept producing probes that passed on a 301.
+  def resolve_probe_headers
+    headers = {}
+    headers["X-Forwarded-Proto"] = "https" if Rails.application.config.force_ssl
+    host = permitted_host
+    headers["Host"] = host if host
+    headers
+  end
+
+  # The first entry of config.hosts that is a concrete hostname. A leading dot
+  # is a domain suffix matcher, not a usable Host value.
+  def permitted_host
+    hosts = begin
+      Rails.application.config.hosts
+    rescue StandardError
+      nil
+    end
+    Array(hosts).find { |h| h.is_a?(String) && !h.empty? && !h.start_with?(".") }
+  end
+
+  # Command for the generated init container. `bin/rails` is the Rails
+  # convention and is what the applied apps use; override with
+  # `init_container: { command: [...] }` for an image whose layout differs.
+  def resolve_init_command
+    settings = Rails.application.config.x.container || {}
+    ic = settings[:init_container] || settings["init_container"] || {}
+    ic = ic.transform_keys(&:to_sym) if ic.respond_to?(:transform_keys)
+    Array(ic[:command]).presence || ["bin/rails", "container:init"]
   end
 
   # Resolves the Process Containment securityContext to inject. Secure by
@@ -111,7 +155,10 @@ namespace :kubernetes do
       allow_privilege_escalation: pc.fetch(:allow_privilege_escalation, false),
       drop_capabilities:          pc.fetch(:drop_capabilities, ["ALL"]),
       read_only_root_filesystem:  pc[:read_only_root_filesystem],
-      run_as_user:                pc[:run_as_user]
+      run_as_user:                pc[:run_as_user],
+      # Restricted PSS refuses a Pod without this, so it is a secure default
+      # rather than an option; `seccomp_profile: nil` opts out.
+      seccomp_profile:            pc.fetch(:seccomp_profile, "RuntimeDefault")
     }
   end
 end
