@@ -43,10 +43,16 @@ end
 #   Sidekiq.shutdown if defined?(Sidekiq)
 # end
 
-# Process Containment (optional). The container layer warns on Kubernetes when
-# the process runs as root (run `bin/rails container:doctor` to preflight).
-# Prefer never being root via the manifest's securityContext (runAsNonRoot:
-# true). Only if the process must start as root -- e.g. to bind a privileged
-# port -- drop to an unprivileged user once that work is done:
+# Process Containment. The container layer warns whenever the process runs as
+# root -- on every platform, since running as root is a property of the image
+# (run `bin/rails container:doctor` to see the pending diagnostics). The layer
+# only reports it; enforcement is the platform's, via the securityContext
+# generated from these settings and applied by the kubelet before the process
+# starts. Fix it in the image (a USER line) and declare the posture here:
 #
-# Rails::Container::Privilege.drop_to(user: "app", group: "app")
+#   process_containment: {
+#     run_as_user:                1000,
+#     run_as_non_root:            true,
+#     allow_privilege_escalation: false,
+#     drop_capabilities:          ["ALL"]
+#   }

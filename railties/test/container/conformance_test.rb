@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "abstract_unit"
-require "minitest/mock"
 require "rails/container"
 require "rails/container/conformance"
 
@@ -14,6 +13,7 @@ class Rails::ContainerConformanceTest < ActiveSupport::TestCase
     Rails::Container.reset_checks
     Rails::Container.reset_init
     Rails::Container::GracefulShutdown.reset!
+    Rails::Container::Privilege.reset!
     @orig_config = Rails.application.config.x.container
     Rails.application.config.x.container = { diagnostics: {} }
   end
@@ -24,6 +24,7 @@ class Rails::ContainerConformanceTest < ActiveSupport::TestCase
     Rails::Container.reset_checks
     Rails::Container.reset_init
     Rails::Container::GracefulShutdown.reset!
+    Rails::Container::Privilege.reset!
     Rails.application.config.x.container = @orig_config
   end
 
@@ -100,16 +101,27 @@ class Rails::ContainerConformanceTest < ActiveSupport::TestCase
     assert_equal :fail, result_for(results, "Self Awareness").status
   end
 
-  test "process_containment fails as root, passes as non-root" do
-    Process.stub(:uid, 0) do
-      results = Rails::Container::Conformance.run(app: health_app)
-      assert_equal :fail, result_for(results, "Process Containment").status
-    end
+  # Stand-in for the id syscalls, so a non-root test runner can model root.
+  FakeIds = Struct.new(:uid, :euid)
 
-    Process.stub(:uid, 1000) do
-      results = Rails::Container::Conformance.run(app: health_app)
-      assert_equal :pass, result_for(results, "Process Containment").status
-    end
+  test "process_containment fails as root, passes as non-root" do
+    Rails::Container::Privilege.syscalls = FakeIds.new(0, 0)
+    results = Rails::Container::Conformance.run(app: health_app)
+    assert_equal :fail, result_for(results, "Process Containment").status
+
+    Rails::Container::Privilege.syscalls = FakeIds.new(1000, 1000)
+    results = Rails::Container::Conformance.run(app: health_app)
+    assert_equal :pass, result_for(results, "Process Containment").status
+  end
+
+  test "process_containment fails when only the effective uid is root" do
+    # Layer 1 must judge a partial drop the same way the diagnostic does: an
+    # effective uid of 0 still carries every privilege the Restricted PSS bars.
+    Rails::Container::Privilege.syscalls = FakeIds.new(1000, 0)
+
+    results = Rails::Container::Conformance.run(app: health_app)
+
+    assert_equal :fail, result_for(results, "Process Containment").status
   end
 
   test "diagnostics reports pending checks" do

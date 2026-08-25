@@ -130,59 +130,6 @@ module Rails
         )
       end
 
-      # --- Process Containment -------------------------------------------
-
-      # Drops the process to the declared unprivileged user, handing over the
-      # paths it must keep writing to first.
-      #
-      # NOT called during boot, by design. The supported way to stop running as
-      # root is the platform's own control: the +process_containment+ settings
-      # already generate a +securityContext+ (+runAsNonRoot+, no privilege
-      # escalation, all capabilities dropped) for the manifest, which the kubelet
-      # enforces externally *before* the process starts. An in-process drop is
-      # strictly weaker -- code runs as root until it happens, it is voluntary,
-      # and changing uid mid-boot surprises anything else in the process (build
-      # steps writing under Rails.root, test suites, an app that already lowered
-      # only its effective ids). The layer therefore *reports* root execution
-      # through diagnostics rather than silently dropping.
-      #
-      # Call this explicitly, early, only for the residual case where the process
-      # genuinely must start as root (binding a privileged port, reading a
-      # root-owned file) and that work cannot move to an Init Container:
-      #
-      #   # config/container.rb, at the top
-      #   Rails::Container.contain_process!   # honours the settings below
-      #
-      #   process_containment: {
-      #     run_as_user:     2000,               # target (also used by the manifest)
-      #     drop_privileges: true,               # opt in to the in-process drop
-      #     ensure_writable: ["log", "tmp"]      # chown these to the target first
-      #   }
-      #
-      # +drop_privileges+ may also name the user explicitly (<tt>"app"</tt> or a
-      # uid) when it differs from +run_as_user+. A no-op unless the process is
-      # root and +drop_privileges+ is declared.
-      #
-      # Returns the Privilege::DropResult, or +nil+ when no drop was requested.
-      def contain_process!
-        settings = config[:process_containment] || {}
-        target = fetch_setting(settings, :drop_privileges)
-        return if target.nil? || target == false
-        # Nothing to drop -- and nothing we *could* drop: handing files over and
-        # calling initgroups both need privilege, so attempting either while
-        # already unprivileged would raise EPERM instead of no-oping. The check
-        # mirrors Privilege.drop_to: an effective uid of 0 still carries full
-        # privilege, so only a process that is non-root by both measures is done.
-        return unless Privilege.syscalls.uid.zero? || Privilege.syscalls.euid.zero?
-
-        target = fetch_setting(settings, :run_as_user) if target == true
-        raise ArgumentError, "drop_privileges requires run_as_user or an explicit user" if target.nil?
-
-        pwent = Privilege.passwd_for(target)
-        ensure_writable!(Array(fetch_setting(settings, :ensure_writable)), pwent)
-        Privilege.drop_to(user: pwent.uid, group: fetch_setting(settings, :run_as_group))
-      end
-
       # --- Built-in diagnostics ------------------------------------------
 
       # Warns when no graceful-shutdown hook is registered -- on every platform.
@@ -201,9 +148,12 @@ module Rails
           "Rails::Container::GracefulShutdown.on_shutdown"
       end
 
-      # Process Containment: warns when the process runs as root -- either the
-      # real or the effective uid is 0, since an effective uid of 0 still carries
-      # full privilege.
+      # Process Containment: warns when the process runs as root.
+      #
+      # Detection only -- the layer never drops privileges itself. Enforcement is
+      # the platform's job (securityContext, applied by the kubelet before the
+      # process starts), so all the layer owes the developer is that the
+      # requirement stops being invisible.
       #
       # Reported on every platform, because running as root is a property of the
       # image and the app, not of the orchestrator: the Restricted Pod Security
@@ -211,11 +161,12 @@ module Rails
       # Docker development silently runs as root, which is exactly why the
       # requirement stays invisible unless the layer says so up front.
       def process_containment_problem
-        return unless Privilege.syscalls.uid.zero? || Privilege.syscalls.euid.zero?
+        return unless Privilege.running_as_root?
 
         "running as root (uid 0); the Kubernetes Restricted Pod Security Standard rejects this. " \
-          "Run as non-root (securityContext.runAsNonRoot / allowPrivilegeEscalation: false) " \
-          "or drop privileges at boot (Rails::Container::Privilege.drop_to)"
+          "Run as non-root: build the image with a USER, or declare it in " \
+          "process_containment (run_as_non_root / allow_privilege_escalation: false) " \
+          "so the generated securityContext enforces it"
       end
 
       # Warns when the Downward API identity was not injected.
@@ -234,35 +185,6 @@ module Rails
       end
 
       private
-        # Reads a Symbol key from container settings, tolerating the string-keyed
-        # Hash that +kubernetes:convert+ writes (mirrors HealthController).
-        def fetch_setting(settings, key)
-          return unless settings.respond_to?(:key?)
-
-          if settings.key?(key)
-            settings[key]
-          elsif settings.key?(key.to_s)
-            settings[key.to_s]
-          end
-        end
-
-        # Creates the declared paths (relative to Rails.root) and hands them to
-        # the target user, so the app can still write after the drop. Done while
-        # still root -- afterwards the process no longer has the privilege. Paths
-        # already owned by the target are left alone, keeping restarts cheap.
-        def ensure_writable!(paths, pwent)
-          return if paths.empty?
-
-          require "fileutils"
-          paths.each do |path|
-            full = Rails.root.join(path.to_s)
-            FileUtils.mkdir_p(full)
-            next if File.stat(full).uid == pwent.uid
-
-            FileUtils.chown_R(pwent.uid, pwent.gid, full)
-          end
-        end
-
         def run_checks
           checks.filter_map do |check|
             message = check.block.call

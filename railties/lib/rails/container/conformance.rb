@@ -111,17 +111,21 @@ module Rails
             end
           end
 
-          # Process Containment: the non-root requirement. Non-root passes;
-          # root fails here and the doctor surfaces it as a warning on Kubernetes.
+          # Process Containment: the non-root requirement. Non-root passes; root
+          # fails here and the doctor warns about it on every platform. Both read
+          # privilege through Privilege.running_as_root?, so an image that lowered
+          # only its effective uid is judged the same way in either place.
           def process_containment
-            uid = process_uid
             configured = !Container.config[:process_containment].nil?
-            if uid&.zero?
+            if Privilege.running_as_root?
               Result.new(pattern: "Process Containment", status: :fail,
-                detail: "running as root (uid 0)#{configured ? '' : '; no process_containment config'} -- doctor warns on kubernetes; use Privilege.drop_to")
+                detail: "running as root (uid #{Privilege.syscalls.uid}/euid #{Privilege.syscalls.euid})" \
+                  "#{configured ? '' : '; no process_containment config'} -- " \
+                  "enforce non-root via the generated securityContext")
             else
               Result.new(pattern: "Process Containment", status: :pass,
-                detail: "running as non-root (uid #{uid})#{configured ? '; process_containment declared' : ''}")
+                detail: "running as non-root (uid #{Privilege.syscalls.uid})" \
+                  "#{configured ? '; process_containment declared' : ''}")
             end
           end
 
@@ -164,12 +168,6 @@ module Rails
               nil
             end
             Array(hosts).find { |h| h.is_a?(String) && !h.empty? && !h.start_with?(".") } || "localhost"
-          end
-
-          def process_uid
-            Process.uid
-          rescue StandardError
-            nil
           end
 
           def with_platform(platform)
