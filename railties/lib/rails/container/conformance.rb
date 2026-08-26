@@ -27,7 +27,7 @@ module Rails
     # ever inspect a registry, never watch the server that will handle the
     # signal. What the server actually did is recorded by
     # Rails::Container::Events and asserted from outside the process --
-    # forks-docker/verify-lifecycle.sh.
+    # verification/verify.sh.
     module Conformance
       Result = Struct.new(:pattern, :status, :detail, keyword_init: true)
 
@@ -76,7 +76,7 @@ module Rails
             if hooks.positive?
               Result.new(pattern: "Managed Lifecycle", status: :pass,
                 detail: "#{hooks} shutdown hook(s) registered" \
-                  "#{timing ? "; timing #{timing.inspect}" : ''} (real SIGTERM drain: verify-lifecycle.sh)")
+                  "#{timing ? "; timing #{timing.inspect}" : ''} (real SIGTERM drain: verification/verify.sh)")
             else
               Result.new(pattern: "Managed Lifecycle", status: :na,
                 detail: "no on_shutdown hooks registered")
@@ -89,7 +89,7 @@ module Rails
             steps = Container.init_steps.map(&:name)
             if steps.any?
               Result.new(pattern: "Init Container", status: :pass,
-                detail: "steps: #{steps.join(', ')} (actual run: verify-lifecycle.sh)")
+                detail: "steps: #{steps.join(', ')} (actual run: verification/verify.sh)")
             else
               Result.new(pattern: "Init Container", status: :na, detail: "no init steps registered")
             end
