@@ -76,11 +76,26 @@ module Rails
         run_checks.reject { |d| ignored.include?(d[:name]) }
       end
 
-      # Logs each pending diagnostic to +logger+ at its severity.
+      # Reports each pending diagnostic twice: an event line on $stdout, and the
+      # full message to +logger+ at its severity.
+      #
+      # The event line exists because the logger's destination is the
+      # application's choice, and a diagnostic nobody can read is not a
+      # diagnostic. An app that leaves Rails' default in place logs to
+      # +log/production.log+, so on Kubernetes its warnings never reach
+      # <tt>kubectl logs</tt> -- measured on one of the three evaluation apps,
+      # whose production.rb has its $stdout logger commented out. Events already
+      # write to $stdout for the same reason (see Events), so surfacing goes
+      # through both.
+      #
+      # Only +name+ and +severity+ travel on the event line: event lines are
+      # +key=value+ and a prose message would break every consumer's parse. The
+      # text stays on the logger line, where it has always been.
       def emit_diagnostics(logger = Rails.logger)
-        return unless logger
-
         diagnostics.each do |d|
+          Events.emit("diagnostic", name: d[:name], severity: d[:severity])
+          next unless logger
+
           line = "[container] #{d[:name]}: #{d[:message]}"
           d[:severity] == :info ? logger.info(line) : logger.warn(line)
         end

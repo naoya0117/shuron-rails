@@ -90,6 +90,28 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
     assert(logger.infos.any? { |m| m.include?("info problem") })
   end
 
+  test "emit_diagnostics emits an event line per diagnostic, with no logger" do
+    Rails::Container.register_check(:a, severity: :warn) { "warn problem" }
+    Rails::Container.register_check(:b, severity: :info) { "info problem" }
+
+    Rails::Container.emit_diagnostics(nil)
+
+    lines = Rails::Container::Events.recorded
+    assert_equal 2, lines.size
+    assert(lines.any? { |l| l.include?("event=diagnostic") && l.include?("name=a") && l.include?("severity=warn") })
+    assert(lines.any? { |l| l.include?("event=diagnostic") && l.include?("name=b") && l.include?("severity=info") })
+    # The prose message must stay off the event line: it would break key=value.
+    assert(lines.none? { |l| l.include?("problem") })
+  end
+
+  test "emit_diagnostics emits nothing when no diagnostic is pending" do
+    Rails::Container.register_check(:a) { nil }
+
+    Rails::Container.emit_diagnostics(nil)
+
+    assert_empty Rails::Container::Events.recorded
+  end
+
   # Init Container ---------------------------------------------------------
 
   test "init_step requires a block and runs steps once, in order, fail-fast" do
