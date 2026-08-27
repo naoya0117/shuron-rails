@@ -28,6 +28,10 @@ module Rails
     # serves traffic, via the +container:init+ task.
     InitStep = Struct.new(:name, :block)
 
+    # A readiness dependency check (Health Probe). +block+ runs on *every*
+    # readiness request, so it must be cheap.
+    ReadinessCheck = Struct.new(:name, :block)
+
     # Self Awareness: the pod's own metadata, injected by the Downward API as
     # environment variables; all fields +nil+ off Kubernetes (local/Docker).
     SelfInfo = Struct.new(:pod_name, :namespace, :node_name, :pod_ip, :service_account, keyword_init: true)
@@ -99,6 +103,46 @@ module Rails
           line = "[container] #{d[:name]}: #{d[:message]}"
           d[:severity] == :info ? logger.info(line) : logger.warn(line)
         end
+      end
+
+      # --- Health Probe: readiness dependency checks ----------------------
+
+      # Registers a dependency to be checked on every readiness request.
+      #
+      # The layer owns the mechanism -- a single timeout budget for the whole
+      # probe, containment of a failing check, the reported shape, and the 503 --
+      # and the application owns *which dependencies matter*. That split is the
+      # same one used by init_step and on_shutdown, and it is the point: only the
+      # app knows that it cannot serve without Redis, or that a search cluster
+      # being down is survivable.
+      #
+      # Before this existed the layer checked the database and nothing else, with
+      # no way to add to it. That hard-coded a decision belonging to the
+      # developer. The usual caution -- every replica probing one shared
+      # dependency takes the whole Service out of rotation together -- is a
+      # reason for a developer to keep readiness narrow, not a reason for the
+      # framework to forbid it.
+      #
+      #   Rails::Container.readiness_check(:redis) do
+      #     RedisConnection.pool.with { |c| c.ping }
+      #   end
+      #
+      # A check fails by raising *or* by returning false/nil. It runs on every
+      # probe (kubelet's +periodSeconds+), so keep it to a round trip -- this is
+      # not the place for a query.
+      def readiness_check(name, &block)
+        raise ArgumentError, "readiness_check requires a block" unless block
+
+        readiness_checks << ReadinessCheck.new(name, block)
+        name
+      end
+
+      def readiness_checks
+        @readiness_checks ||= []
+      end
+
+      def reset_readiness_checks
+        @readiness_checks = []
       end
 
       # --- Init Container -------------------------------------------------

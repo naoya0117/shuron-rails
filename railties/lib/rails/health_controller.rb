@@ -100,17 +100,40 @@ module Rails
       head :ok
     end
 
+    # Readiness: the built-in database check, then every dependency the
+    # application registered with Rails::Container.readiness_check.
+    #
+    # The whole probe shares **one** timeout budget rather than one per check.
+    # Per-check timeouts multiply: with a 500ms budget and seven checks the
+    # kubelet's own timeoutSeconds (3 in the generated manifest) would fire
+    # first, and the developer would have to recompute it every time a
+    # dependency was added. Keeping the budget for the probe is the mechanism's
+    # job, not the app's.
     def ready
-      database_status = database_check_status
-      checks = { database: database_status }
+      checks = {}
+      pending = nil
 
-      if database_status == "ok" || database_status == "skipped"
+      begin
+        Timeout.timeout(readiness_timeout_ms / 1000.0) do
+          each_readiness_check do |name, block|
+            pending = name
+            checks[name] = block ? call_readiness_check(block) : database_check_status
+            pending = nil
+          end
+        end
+      rescue Timeout::Error
+        # Attribute the expiry to whichever check was in flight; anything after
+        # it simply never ran and is not reported as passing.
+        checks[pending] = "timeout" if pending
+      rescue StandardError
+        checks[pending || :database] = "error"
+      end
+
+      if checks.values.all? { |v| v == "ok" || v == "skipped" }
         render_ready(checks: checks)
       else
         render_not_ready(checks: checks)
       end
-    rescue Exception
-      render_not_ready(checks: { database: "error" })
     end
 
     private
@@ -142,15 +165,44 @@ module Rails
         end
       end
 
+      # Yields [name, block] for each check, database first. The database's
+      # block is nil because it is the layer's own check, not a registered one.
+      def each_readiness_check
+        yield :database, nil
+        return unless defined?(Rails::Container)
+
+        Rails::Container.readiness_checks.each { |c| yield c.name, c.block }
+      end
+
+      # A check fails by raising or by returning false/nil.
+      #
+      # +rescue StandardError+, deliberately not +rescue Exception+. Timeout
+      # unwinds the block with Timeout::ExitException, which descends from
+      # Exception and *not* from StandardError, so rescuing Exception here
+      # swallows the unwind and the shared budget above never fires -- a hanging
+      # dependency would hang the probe rather than fail it, which is the worse
+      # outcome. Measured: with +rescue Exception+ a sleeping check reported
+      # "error" after running to completion instead of "timeout".
+      #
+      # Known limit: a check whose *own* body rescues Exception defeats the
+      # budget the same way, and no framework can prevent that from outside. The
+      # layer owns the budget; not sabotaging it is the block's side of the
+      # contract, as idempotency is for init_step.
+      def call_readiness_check(block)
+        block.call ? "ok" : "error"
+      rescue StandardError
+        "error"
+      end
+
+      # No inner timeout: the budget is held by #ready for the whole probe.
+      # StandardError for the same reason as call_readiness_check.
       def database_check_status
         return "skipped" unless database_check_enabled?
         return "skipped" unless defined?(ActiveRecord::Base)
 
-        Timeout.timeout(readiness_timeout_ms / 1000.0) do
-          ActiveRecord::Base.connection_pool.with_connection { |conn| conn.verify!; true }
-        end
+        ActiveRecord::Base.connection_pool.with_connection { |conn| conn.verify!; true }
         "ok"
-      rescue Exception
+      rescue StandardError
         "error"
       end
 
