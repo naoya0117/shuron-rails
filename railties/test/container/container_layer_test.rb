@@ -287,4 +287,56 @@ class Rails::ContainerLayerTest < ActiveSupport::TestCase
             .sub(/ duration_ms=\d+/, "")
       end
     end
+
+  # --- Self Awareness: 値そのものをログに出す ------------------------------
+
+  test "emit_self_awareness prints the Downward API values, not just whether they arrived" do
+    ENV["CONTAINER_PLATFORM"] = "kubernetes"
+    ENV["POD_NAME"] = "web-7d9f"
+    ENV["POD_NAMESPACE"] = "shop"
+    ENV["NODE_NAME"] = "node-a"
+    ENV["POD_IP"] = "10.244.1.5"
+    ENV["POD_SERVICE_ACCOUNT"] = "default"
+
+    Rails::Container.emit_self_awareness
+
+    line = Rails::Container::Events.recorded.find { |l| l.include?("event=self_awareness") }
+    assert line, "self_awareness の行が出ていない"
+    assert_includes line, "pod=web-7d9f"
+    assert_includes line, "namespace=shop"
+    assert_includes line, "node=node-a"
+    assert_includes line, "ip=10.244.1.5"
+    assert_includes line, "service_account=default"
+  end
+
+  # 部分注入は「行が短くなる」のではなく「欠けた項目が - になる」形で見えるべき。
+  # 短くなる形だと、欠落と行の書式変更が区別できない。
+  test "emit_self_awareness marks a missing field as - rather than dropping it" do
+    ENV["CONTAINER_PLATFORM"] = "kubernetes"
+    ENV["POD_NAME"] = "web-7d9f"
+    ENV["POD_NAMESPACE"] = "shop"
+
+    Rails::Container.emit_self_awareness
+
+    line = Rails::Container::Events.recorded.find { |l| l.include?("event=self_awareness") }
+    assert_includes line, "pod=web-7d9f"
+    assert_includes line, "node=-"
+    assert_includes line, "ip=-"
+    assert_includes line, "service_account=-"
+  end
+
+  # Kubernetes 以外では Downward API 自体が存在しないので、空欄だけの行は
+  # 証拠ではなく雑音になる。boot 行の platform= が「k8s でない」と
+  # 「k8s だが注入されていない」を区別する。
+  test "emit_self_awareness stays silent off kubernetes" do
+    %w[local compose].each do |platform|
+      Rails::Container::Events.reset!
+      ENV["CONTAINER_PLATFORM"] = platform
+      ENV["POD_NAME"] = "leaked-from-the-host"
+
+      Rails::Container.emit_self_awareness
+
+      assert_empty Rails::Container::Events.recorded, "#{platform} で self_awareness が出ている"
+    end
+  end
 end

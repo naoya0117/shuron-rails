@@ -257,6 +257,32 @@ module Rails
         Events.emit("boot", **boot_summary)
       end
 
+      # Emits the Downward API values themselves, not just whether they arrived.
+      #
+      # The boot line carries `identity=injected|absent`, which answers "did the
+      # platform inject anything" but not "what did this Pod learn about itself".
+      # Self Awareness is the one pattern whose whole content *is* those values,
+      # so the only way to confirm it from outside the process is to print them.
+      #
+      # Kubernetes only, for the same reason self_awareness_problem is: Docker
+      # has no Downward API at all, so a line of empty fields off the platform
+      # would be noise rather than evidence. The boot line's `platform=` already
+      # distinguishes "not Kubernetes" from "Kubernetes but not injected".
+      #
+      # A missing field prints as `-` rather than being dropped, so a partial
+      # injection is visible as a partial line instead of a shorter one.
+      def emit_self_awareness
+        return unless platform == :kubernetes
+
+        info = self_info
+        Events.emit("self_awareness",
+          pod: info.pod_name || "-",
+          namespace: info.namespace || "-",
+          node: info.node_name || "-",
+          ip: info.pod_ip || "-",
+          service_account: info.service_account || "-")
+      end
+
       # --- Built-in diagnostics ------------------------------------------
 
       # Warns when no graceful-shutdown hook is registered -- on every platform.

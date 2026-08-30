@@ -37,6 +37,7 @@ module Rails
         # hook does not.
         app.config.after_initialize do
           Rails::Container.emit_boot_summary
+          Rails::Container.emit_self_awareness
           Rails::Container.emit_diagnostics
         end
       end
